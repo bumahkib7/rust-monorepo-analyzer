@@ -33,8 +33,10 @@ pub fn create_finding(
     let end = node.end_position();
 
     let snippet = node.utf8_text(content.as_bytes()).ok().map(|s: &str| {
-        if s.len() > 200 {
-            format!("{}...", &s[..200])
+        if s.chars().count() > 200 {
+            // Safely truncate at char boundary
+            let truncated: String = s.chars().take(200).collect();
+            format!("{}...", truncated)
         } else {
             s.to_string()
         }

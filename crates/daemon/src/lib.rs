@@ -36,8 +36,19 @@ impl Default for DaemonConfig {
     }
 }
 
-/// Start the daemon server
-pub async fn start_server(config: DaemonConfig) -> Result<()> {
+/// Start the daemon server with just an address string
+pub async fn start_server(addr: &str) -> Result<()> {
+    let parts: Vec<&str> = addr.split(':').collect();
+    let config = DaemonConfig {
+        host: parts.first().unwrap_or(&"127.0.0.1").to_string(),
+        port: parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(8080),
+        ..Default::default()
+    };
+    start_server_with_config(config).await
+}
+
+/// Start the daemon server with full configuration
+pub async fn start_server_with_config(config: DaemonConfig) -> Result<()> {
     let state = Arc::new(RwLock::new(AppState::new(config.rma_config)));
 
     let cors = CorsLayer::new()

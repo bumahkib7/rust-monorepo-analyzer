@@ -1,115 +1,318 @@
 //! RMA CLI - Rust Monorepo Analyzer Command Line Interface
+//!
+//! A sophisticated, intelligent, color-coded CLI for code analysis and security scanning.
+
+mod commands;
+mod output;
+mod ui;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
-use indicatif::{ProgressBar, ProgressStyle};
-use rma_analyzer::{AnalysisSummary, AnalyzerEngine, FileAnalysis};
-use rma_common::{RmaConfig, Severity};
-use rma_indexer::{IndexConfig, IndexerEngine};
-use rma_parser::ParserEngine;
+use std::io;
 use std::path::PathBuf;
-use std::time::Instant;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
+/// RMA - Ultra-fast Rust-native code intelligence and security analyzer
+///
+/// Analyzes codebases for security vulnerabilities, code quality issues,
+/// and provides intelligent insights with optional AI-powered deep analysis.
 #[derive(Parser)]
 #[command(name = "rma")]
-#[command(author = "RMA Team")]
-#[command(version = "0.1.0")]
-#[command(about = "Ultra-fast Rust-native code intelligence and security analyzer", long_about = None)]
-struct Cli {
-    /// Verbosity level
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    verbose: u8,
+#[command(author = "RMA Team <rma@example.com>")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(about = "Ultra-fast code intelligence and security analyzer", long_about = None)]
+#[command(after_help = format!(
+    "{}\n  {} {}\n  {} {}\n  {} {}",
+    "Examples:".cyan().bold(),
+    "$".dimmed(), "rma scan ./my-project --format json",
+    "$".dimmed(), "rma watch . --ai",
+    "$".dimmed(), "rma search 'sql injection' --limit 10"
+))]
+#[command(propagate_version = true)]
+pub struct Cli {
+    /// Verbosity level (-v info, -vv debug, -vvv trace)
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    pub verbose: u8,
+
+    /// Suppress all output except errors
+    #[arg(short, long, global = true)]
+    pub quiet: bool,
+
+    /// Disable colored output
+    #[arg(long, global = true, env = "NO_COLOR")]
+    pub no_color: bool,
+
+    /// Configuration file path
+    #[arg(short, long, global = true, env = "RMA_CONFIG")]
+    pub config: Option<PathBuf>,
 
     #[command(subcommand)]
-    command: Commands,
+    pub command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Commands {
+pub enum Commands {
     /// Scan a repository for security issues and code metrics
+    #[command(visible_alias = "s")]
     Scan {
         /// Path to the repository to scan
         #[arg(default_value = ".")]
         path: PathBuf,
 
-        /// Output format
-        #[arg(short, long, default_value = "text")]
-        output: OutputFormat,
+        /// Output format (text, json, sarif)
+        #[arg(short, long, default_value = "text", value_enum)]
+        format: OutputFormat,
 
         /// Output file (stdout if not specified)
-        #[arg(short = 'f', long)]
-        output_file: Option<PathBuf>,
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
 
         /// Minimum severity to report
-        #[arg(short, long, default_value = "warning")]
+        #[arg(short, long, default_value = "warning", value_enum)]
         severity: SeverityArg,
 
-        /// Enable incremental mode
+        /// Enable incremental mode (only scan changed files)
         #[arg(short, long)]
         incremental: bool,
 
-        /// Number of parallel workers (0 = auto)
+        /// Number of parallel workers (0 = auto-detect)
         #[arg(short = 'j', long, default_value = "0")]
-        parallelism: usize,
+        jobs: usize,
 
-        /// Languages to scan (comma-separated, empty = all)
-        #[arg(short, long)]
-        languages: Option<String>,
+        /// Languages to scan (comma-separated: rust,js,ts,py,go,java)
+        #[arg(short, long, value_delimiter = ',')]
+        languages: Option<Vec<String>>,
+
+        /// Enable AI-powered deep analysis
+        #[arg(long, visible_alias = "ai")]
+        ai_analysis: bool,
+
+        /// AI provider (claude, openai, local)
+        #[arg(long, default_value = "claude", requires = "ai_analysis")]
+        ai_provider: String,
+
+        /// Show detailed timing information
+        #[arg(long)]
+        timing: bool,
+
+        /// Exclude patterns (glob)
+        #[arg(short = 'x', long, value_delimiter = ',')]
+        exclude: Option<Vec<String>>,
     },
 
-    /// Search the index for files or findings
-    Search {
-        /// Search query
-        query: String,
-
-        /// Maximum results
-        #[arg(short, long, default_value = "20")]
-        limit: usize,
-    },
-
-    /// Show index statistics
-    Stats,
-
-    /// Initialize RMA configuration
-    Init {
-        /// Path to initialize
-        #[arg(default_value = ".")]
-        path: PathBuf,
-    },
-
-    /// Watch for file changes and re-analyze
+    /// Watch for file changes and re-analyze in real-time
+    #[command(visible_alias = "w")]
     Watch {
         /// Path to watch
         #[arg(default_value = ".")]
         path: PathBuf,
+
+        /// Debounce interval for file changes
+        #[arg(short, long, default_value = "500ms")]
+        interval: String,
+
+        /// Enable AI analysis on changes
+        #[arg(long)]
+        ai: bool,
+
+        /// Only watch specific file patterns
+        #[arg(short, long)]
+        pattern: Option<String>,
+    },
+
+    /// Search indexed findings and code
+    #[command(visible_alias = "q")]
+    Search {
+        /// Search query (supports regex)
+        query: String,
+
+        /// Repository path to search
+        #[arg(short, long, default_value = ".")]
+        repo: PathBuf,
+
+        /// Maximum results to return
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+
+        /// Filter by severity
+        #[arg(short, long)]
+        severity: Option<SeverityArg>,
+
+        /// Filter by rule ID
+        #[arg(short = 'r', long)]
+        rule: Option<String>,
+
+        /// Output format
+        #[arg(short, long, default_value = "text", value_enum)]
+        format: OutputFormat,
+    },
+
+    /// Show repository statistics and metrics
+    Stats {
+        /// Path to analyze
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Show detailed breakdown by language
+        #[arg(short, long)]
+        detailed: bool,
+
+        /// Output format
+        #[arg(short, long, default_value = "text", value_enum)]
+        format: OutputFormat,
+    },
+
+    /// Start the RMA HTTP daemon server
+    Daemon {
+        /// Port to listen on
+        #[arg(short, long, default_value = "8080")]
+        port: u16,
+
+        /// Host to bind to
+        #[arg(short = 'H', long, default_value = "127.0.0.1")]
+        host: String,
+
+        /// Run in background (daemonize)
+        #[arg(short, long)]
+        background: bool,
+    },
+
+    /// Manage WASM plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+
+    /// Manage RMA configuration
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+
+    /// Initialize RMA in a repository
+    Init {
+        /// Path to initialize
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Force overwrite existing configuration
+        #[arg(short, long)]
+        force: bool,
+
+        /// Initialize with AI features enabled
+        #[arg(long)]
+        with_ai: bool,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+
+    /// Run benchmarks
+    #[command(hide = true)]
+    Bench {
+        /// Path to benchmark
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Number of iterations
+        #[arg(short, long, default_value = "3")]
+        iterations: usize,
     },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum OutputFormat {
-    Text,
-    Json,
-    Sarif,
+#[derive(Subcommand)]
+pub enum PluginAction {
+    /// List installed plugins
+    List,
+    /// Install a plugin from path or URL
+    Install {
+        /// Plugin path or URL
+        source: String,
+    },
+    /// Remove a plugin
+    Remove {
+        /// Plugin name
+        name: String,
+    },
+    /// Test a plugin
+    Test {
+        /// Plugin name or path
+        plugin: String,
+        /// Test file path
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+    },
+    /// Show plugin info
+    Info {
+        /// Plugin name
+        name: String,
+    },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum SeverityArg {
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Get a configuration value
+    Get {
+        /// Configuration key (e.g., "ai.provider")
+        key: String,
+    },
+    /// Set a configuration value
+    Set {
+        /// Configuration key
+        key: String,
+        /// Value to set
+        value: String,
+    },
+    /// List all configuration values
+    List,
+    /// Edit configuration in $EDITOR
+    Edit,
+    /// Show configuration file path
+    Path,
+    /// Reset to defaults
+    Reset {
+        /// Don't ask for confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq)]
+pub enum OutputFormat {
+    /// Human-readable text with colors
+    Text,
+    /// JSON format
+    Json,
+    /// SARIF format (for CI/CD integration)
+    Sarif,
+    /// Compact single-line format
+    Compact,
+    /// Markdown table format
+    Markdown,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SeverityArg {
     Info,
     Warning,
     Error,
     Critical,
 }
 
-impl From<SeverityArg> for Severity {
+impl From<SeverityArg> for rma_common::Severity {
     fn from(arg: SeverityArg) -> Self {
         match arg {
-            SeverityArg::Info => Severity::Info,
-            SeverityArg::Warning => Severity::Warning,
-            SeverityArg::Error => Severity::Error,
-            SeverityArg::Critical => Severity::Critical,
+            SeverityArg::Info => rma_common::Severity::Info,
+            SeverityArg::Warning => rma_common::Severity::Warning,
+            SeverityArg::Error => rma_common::Severity::Error,
+            SeverityArg::Critical => rma_common::Severity::Critical,
         }
     }
 }
@@ -117,387 +320,143 @@ impl From<SeverityArg> for Severity {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Setup logging
-    let log_level = match cli.verbose {
-        0 => Level::WARN,
-        1 => Level::INFO,
-        2 => Level::DEBUG,
-        _ => Level::TRACE,
-    };
+    // Handle color settings
+    if cli.no_color {
+        colored::control::set_override(false);
+    }
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(log_level)
-        .with_target(false)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+    // Setup logging based on verbosity
+    if !cli.quiet {
+        let log_level = match cli.verbose {
+            0 => Level::WARN,
+            1 => Level::INFO,
+            2 => Level::DEBUG,
+            _ => Level::TRACE,
+        };
 
-    match cli.command {
+        let subscriber = FmtSubscriber::builder()
+            .with_max_level(log_level)
+            .with_target(cli.verbose >= 2)
+            .with_thread_ids(cli.verbose >= 3)
+            .with_file(cli.verbose >= 3)
+            .with_line_number(cli.verbose >= 3)
+            .finish();
+
+        let _ = tracing::subscriber::set_global_default(subscriber);
+    }
+
+    // Load config if specified
+    let config_path = cli.config.clone();
+
+    // Execute command
+    let result = match cli.command {
         Commands::Scan {
             path,
+            format,
             output,
-            output_file,
             severity,
             incremental,
-            parallelism,
+            jobs,
             languages,
-        } => {
-            run_scan(
-                &path,
-                output,
-                output_file,
-                severity.into(),
-                incremental,
-                parallelism,
-                languages,
-            )?;
-        }
-        Commands::Search { query, limit } => {
-            run_search(&query, limit)?;
-        }
-        Commands::Stats => {
-            run_stats()?;
-        }
-        Commands::Init { path } => {
-            run_init(&path)?;
-        }
-        Commands::Watch { path } => {
-            run_watch(&path)?;
-        }
-    }
+            ai_analysis,
+            ai_provider,
+            timing,
+            exclude,
+        } => commands::scan::run(commands::scan::ScanArgs {
+            path,
+            format,
+            output,
+            severity: severity.into(),
+            incremental,
+            jobs,
+            languages,
+            ai_analysis,
+            ai_provider,
+            timing,
+            exclude,
+            config_path,
+            quiet: cli.quiet,
+        }),
 
-    Ok(())
-}
+        Commands::Watch {
+            path,
+            interval,
+            ai,
+            pattern,
+        } => commands::watch::run(commands::watch::WatchArgs {
+            path,
+            interval,
+            ai,
+            pattern,
+            quiet: cli.quiet,
+        }),
 
-fn run_scan(
-    path: &std::path::Path,
-    output: OutputFormat,
-    output_file: Option<PathBuf>,
-    min_severity: Severity,
-    incremental: bool,
-    parallelism: usize,
-    languages: Option<String>,
-) -> Result<()> {
-    let start = Instant::now();
+        Commands::Search {
+            query,
+            repo,
+            limit,
+            severity,
+            rule,
+            format,
+        } => commands::search::run(commands::search::SearchArgs {
+            query,
+            repo,
+            limit,
+            severity: severity.map(Into::into),
+            rule,
+            format,
+        }),
 
-    println!("{}", "🔍 RMA - Rust Monorepo Analyzer".cyan().bold());
-    println!("Scanning: {}\n", path.display());
+        Commands::Stats {
+            path,
+            detailed,
+            format,
+        } => commands::stats::run(commands::stats::StatsArgs {
+            path,
+            detailed,
+            format,
+        }),
 
-    // Build config
-    let mut config = RmaConfig {
-        min_severity,
-        incremental,
-        parallelism,
-        ..Default::default()
+        Commands::Daemon {
+            port,
+            host,
+            background,
+        } => commands::daemon::run(commands::daemon::DaemonArgs {
+            port,
+            host,
+            background,
+        }),
+
+        Commands::Plugin { action } => commands::plugin::run(action),
+
+        Commands::Config { action } => commands::config::run(action),
+
+        Commands::Init {
+            path,
+            force,
+            with_ai,
+        } => commands::init::run(commands::init::InitArgs {
+            path,
+            force,
+            with_ai,
+        }),
+
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, name, &mut io::stdout());
+            Ok(())
+        }
+
+        Commands::Bench { path, iterations } => {
+            commands::bench::run(commands::bench::BenchArgs { path, iterations })
+        }
     };
 
-    if let Some(langs) = languages {
-        config.languages = langs
-            .split(',')
-            .filter_map(|l| match l.trim().to_lowercase().as_str() {
-                "rust" | "rs" => Some(rma_common::Language::Rust),
-                "javascript" | "js" => Some(rma_common::Language::JavaScript),
-                "typescript" | "ts" => Some(rma_common::Language::TypeScript),
-                "python" | "py" => Some(rma_common::Language::Python),
-                "go" => Some(rma_common::Language::Go),
-                "java" => Some(rma_common::Language::Java),
-                _ => None,
-            })
-            .collect();
-    }
-
-    // Parse
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}")?);
-    pb.set_message("Parsing files...");
-
-    let parser = ParserEngine::new(config.clone());
-    let (parsed_files, parse_stats) = parser.parse_directory(path)?;
-
-    pb.finish_with_message(format!(
-        "✓ Parsed {} files ({} skipped)",
-        parse_stats.files_parsed, parse_stats.files_skipped
-    ));
-
-    // Analyze
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}")?);
-    pb.set_message("Analyzing...");
-
-    let analyzer = AnalyzerEngine::new(config.clone());
-    let (results, summary) = analyzer.analyze_files(&parsed_files)?;
-
-    pb.finish_with_message(format!(
-        "✓ Analyzed {} files, found {} findings",
-        summary.files_analyzed, summary.total_findings
-    ));
-
-    // Index results
-    let index_config = IndexConfig {
-        index_path: path.join(".rma/index"),
-        ..Default::default()
-    };
-
-    if let Ok(indexer) = IndexerEngine::new(index_config) {
-        let _ = indexer.index_results(&results);
-    }
-
-    let duration = start.elapsed();
-
-    // Output results
-    match output {
-        OutputFormat::Text => output_text(&results, &summary, duration),
-        OutputFormat::Json => output_json(&results, &summary, duration, output_file)?,
-        OutputFormat::Sarif => output_sarif(&results, output_file)?,
-    }
-
-    Ok(())
-}
-
-fn output_text(results: &[FileAnalysis], summary: &AnalysisSummary, duration: std::time::Duration) {
-    println!("\n{}", "═".repeat(60).dimmed());
-    println!("{}", "SCAN SUMMARY".cyan().bold());
-    println!("{}", "═".repeat(60).dimmed());
-
-    println!("Files analyzed:    {}", summary.files_analyzed);
-    println!("Total lines:       {}", summary.total_loc);
-    println!("Total complexity:  {}", summary.total_complexity);
-    println!("Duration:          {:.2}s", duration.as_secs_f64());
-
-    println!("\n{}", "FINDINGS".yellow().bold());
-    println!("{}", "─".repeat(40).dimmed());
-
-    if summary.critical_count > 0 {
-        println!(
-            "  {} Critical:  {}",
-            "●".red(),
-            summary.critical_count.to_string().red().bold()
-        );
-    }
-    if summary.error_count > 0 {
-        println!(
-            "  {} Error:     {}",
-            "●".bright_red(),
-            summary.error_count.to_string().bright_red()
-        );
-    }
-    if summary.warning_count > 0 {
-        println!(
-            "  {} Warning:   {}",
-            "●".yellow(),
-            summary.warning_count.to_string().yellow()
-        );
-    }
-    if summary.info_count > 0 {
-        println!(
-            "  {} Info:      {}",
-            "●".blue(),
-            summary.info_count.to_string().blue()
-        );
-    }
-
-    println!("\n{}", "DETAILS".cyan().bold());
-    println!("{}", "─".repeat(40).dimmed());
-
-    for result in results {
-        if result.findings.is_empty() {
-            continue;
-        }
-
-        println!("\n{}", result.path.bright_white());
-
-        for finding in &result.findings {
-            let severity_color = match finding.severity {
-                Severity::Critical => "CRIT".red().bold(),
-                Severity::Error => "ERR ".bright_red(),
-                Severity::Warning => "WARN".yellow(),
-                Severity::Info => "INFO".blue(),
-            };
-
-            println!(
-                "  {} [{}] {}:{}  {}",
-                severity_color,
-                finding.rule_id.dimmed(),
-                finding.location.start_line,
-                finding.location.start_column,
-                finding.message
-            );
-
-            if let Some(snippet) = &finding.snippet {
-                let truncated = if snippet.len() > 80 {
-                    format!("{}...", &snippet[..77])
-                } else {
-                    snippet.clone()
-                };
-                println!("      {}", truncated.dimmed());
-            }
-        }
-    }
-
-    println!("\n{}", "═".repeat(60).dimmed());
-}
-
-fn output_json(
-    results: &[FileAnalysis],
-    summary: &AnalysisSummary,
-    duration: std::time::Duration,
-    output_file: Option<PathBuf>,
-) -> Result<()> {
-    let output = serde_json::json!({
-        "summary": summary,
-        "duration_ms": duration.as_millis(),
-        "results": results,
-    });
-
-    let json = serde_json::to_string_pretty(&output)?;
-
-    if let Some(path) = output_file {
-        std::fs::write(path, &json)?;
-    } else {
-        println!("{}", json);
-    }
-
-    Ok(())
-}
-
-fn output_sarif(results: &[FileAnalysis], output_file: Option<PathBuf>) -> Result<()> {
-    // Build SARIF report
-    let sarif = serde_json::json!({
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "RMA",
-                    "version": "0.1.0",
-                    "informationUri": "https://github.com/bumahkib7/rust-monorepo-analyzer"
-                }
-            },
-            "results": results.iter().flat_map(|r| {
-                r.findings.iter().map(|f| {
-                    serde_json::json!({
-                        "ruleId": f.rule_id,
-                        "level": match f.severity {
-                            Severity::Critical | Severity::Error => "error",
-                            Severity::Warning => "warning",
-                            Severity::Info => "note",
-                        },
-                        "message": {
-                            "text": f.message
-                        },
-                        "locations": [{
-                            "physicalLocation": {
-                                "artifactLocation": {
-                                    "uri": f.location.file.display().to_string()
-                                },
-                                "region": {
-                                    "startLine": f.location.start_line,
-                                    "startColumn": f.location.start_column,
-                                    "endLine": f.location.end_line,
-                                    "endColumn": f.location.end_column
-                                }
-                            }
-                        }]
-                    })
-                }).collect::<Vec<_>>()
-            }).collect::<Vec<_>>()
-        }]
-    });
-
-    let json = serde_json::to_string_pretty(&sarif)?;
-
-    if let Some(path) = output_file {
-        std::fs::write(path, &json)?;
-    } else {
-        println!("{}", json);
-    }
-
-    Ok(())
-}
-
-fn run_search(query: &str, limit: usize) -> Result<()> {
-    let index_config = IndexConfig {
-        index_path: PathBuf::from(".rma/index"),
-        ..Default::default()
-    };
-
-    let indexer = IndexerEngine::new(index_config)?;
-    let results = indexer.search(query, limit)?;
-
-    println!("{}", "Search Results".cyan().bold());
-    println!("{}", "─".repeat(40).dimmed());
-
-    for result in results {
-        println!(
-            "{} ({}) - {} findings, score: {:.2}",
-            result.path.bright_white(),
-            result.language.dimmed(),
-            result.findings_count,
-            result.score
-        );
-    }
-
-    Ok(())
-}
-
-fn run_stats() -> Result<()> {
-    let index_config = IndexConfig {
-        index_path: PathBuf::from(".rma/index"),
-        ..Default::default()
-    };
-
-    let indexer = IndexerEngine::new(index_config)?;
-    let stats = indexer.stats()?;
-
-    println!("{}", "Index Statistics".cyan().bold());
-    println!("{}", "─".repeat(40).dimmed());
-    println!("Index path:     {:?}", stats.index_path);
-    println!("Documents:      {}", stats.num_docs);
-
-    Ok(())
-}
-
-fn run_init(path: &PathBuf) -> Result<()> {
-    let config_dir = path.join(".rma");
-    std::fs::create_dir_all(&config_dir)?;
-
-    let config = RmaConfig::default();
-    let config_json = serde_json::to_string_pretty(&config)?;
-    std::fs::write(config_dir.join("config.json"), config_json)?;
-
-    println!("{} Initialized RMA in {:?}", "✓".green(), path);
-    println!("  Created .rma/config.json");
-
-    Ok(())
-}
-
-fn run_watch(path: &std::path::Path) -> Result<()> {
-    use rma_indexer::watcher;
-
-    println!("{} Watching {} for changes...", "👁".cyan(), path.display());
-    println!("Press Ctrl+C to stop\n");
-
-    let (_watcher, rx) = watcher::watch_directory(path)?;
-
-    let config = RmaConfig::default();
-    let parser = ParserEngine::new(config.clone());
-    let analyzer = AnalyzerEngine::new(config);
-
-    while let Ok(event) = rx.recv() {
-        let events = watcher::filter_source_events(vec![event]);
-        for ev in events {
-            println!("{} {:?}: {}", "→".yellow(), ev.kind, ev.path.display());
-
-            // Re-analyze the changed file
-            if let Ok(content) = std::fs::read_to_string(&ev.path) {
-                if let Ok(parsed) = parser.parse_file(&ev.path, &content) {
-                    if let Ok(analysis) = analyzer.analyze_file(&parsed) {
-                        if !analysis.findings.is_empty() {
-                            println!("  {} {} findings", "⚠".yellow(), analysis.findings.len());
-                        }
-                    }
-                }
-            }
-        }
+    // Handle errors with helpful suggestions
+    if let Err(e) = result {
+        ui::errors::print_error(&e, cli.verbose > 0);
+        std::process::exit(1);
     }
 
     Ok(())
