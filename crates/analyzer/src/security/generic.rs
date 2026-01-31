@@ -61,7 +61,7 @@ impl Rule for TodoFixmeRule {
                 || upper.contains("HACK")
                 || upper.contains("XXX")
             {
-                findings.push(Finding {
+                let mut finding = Finding {
                     id: format!("{}-{}", self.id(), line_num),
                     rule_id: self.id().to_string(),
                     message: "TODO/FIXME comment indicates potentially incomplete code".to_string(),
@@ -76,7 +76,12 @@ impl Rule for TodoFixmeRule {
                     language: parsed.language,
                     snippet: Some(line.trim().to_string()),
                     suggestion: None,
-                });
+                    confidence: rma_common::Confidence::High,
+                    category: rma_common::FindingCategory::Style,
+                    fingerprint: None,
+                };
+                finding.compute_fingerprint();
+                findings.push(finding);
             }
         }
         findings

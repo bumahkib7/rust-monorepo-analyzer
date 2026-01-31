@@ -102,7 +102,7 @@ pub struct PluginFinding {
 
 impl From<PluginFinding> for Finding {
     fn from(pf: PluginFinding) -> Self {
-        Finding {
+        let mut finding = Finding {
             id: format!(
                 "plugin-{}-{}-{}",
                 pf.rule_id, pf.start_line, pf.start_column
@@ -125,7 +125,12 @@ impl From<PluginFinding> for Finding {
             language: Language::Unknown,
             snippet: pf.snippet,
             suggestion: pf.suggestion,
-        }
+            confidence: rma_common::Confidence::Medium,
+            category: rma_common::FindingCategory::Quality,
+            fingerprint: None,
+        };
+        finding.compute_fingerprint();
+        finding
     }
 }
 

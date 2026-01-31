@@ -115,6 +115,55 @@ impl std::fmt::Display for Severity {
     }
 }
 
+/// Confidence level for findings (how certain we are this is a real issue)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Confidence {
+    /// Low confidence - may be a false positive, requires manual review
+    Low,
+    /// Medium confidence - likely an issue but context-dependent
+    #[default]
+    Medium,
+    /// High confidence - almost certainly a real issue
+    High,
+}
+
+impl std::fmt::Display for Confidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Confidence::Low => write!(f, "low"),
+            Confidence::Medium => write!(f, "medium"),
+            Confidence::High => write!(f, "high"),
+        }
+    }
+}
+
+/// Category of finding
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FindingCategory {
+    /// Security vulnerabilities
+    #[default]
+    Security,
+    /// Code quality and maintainability
+    Quality,
+    /// Performance issues
+    Performance,
+    /// Style and formatting
+    Style,
+}
+
+impl std::fmt::Display for FindingCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FindingCategory::Security => write!(f, "security"),
+            FindingCategory::Quality => write!(f, "quality"),
+            FindingCategory::Performance => write!(f, "performance"),
+            FindingCategory::Style => write!(f, "style"),
+        }
+    }
+}
+
 /// A source code location
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceLocation {
@@ -170,6 +219,36 @@ pub struct Finding {
     pub snippet: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+    /// Confidence level (how certain we are this is a real issue)
+    #[serde(default)]
+    pub confidence: Confidence,
+    /// Category of finding (security, quality, performance, style)
+    #[serde(default)]
+    pub category: FindingCategory,
+    /// Stable fingerprint for baseline comparison (sha256 hash)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+}
+
+impl Finding {
+    /// Compute a stable fingerprint for this finding
+    /// Based on: rule_id + relative path + normalized snippet
+    pub fn compute_fingerprint(&mut self) {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        hasher.update(self.rule_id.as_bytes());
+        hasher.update(self.location.file.to_string_lossy().as_bytes());
+
+        // Normalize snippet by removing whitespace
+        if let Some(snippet) = &self.snippet {
+            let normalized: String = snippet.split_whitespace().collect::<Vec<_>>().join(" ");
+            hasher.update(normalized.as_bytes());
+        }
+
+        let hash = hasher.finalize();
+        self.fingerprint = Some(format!("sha256:{:x}", hash)[..23].to_string());
+    }
 }
 
 /// Code metrics for a file or function

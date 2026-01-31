@@ -11,6 +11,17 @@ use rma_analyzer::{AnalysisSummary, FileAnalysis};
 use rma_common::Severity;
 use std::time::Duration;
 
+/// Normalize a file path for GitHub Actions
+/// Removes ./ prefix to ensure GitHub can locate the file
+fn normalize_path(path: &std::path::Path) -> String {
+    let path_str = path.display().to_string();
+    path_str
+        .strip_prefix("./")
+        .or_else(|| path_str.strip_prefix(".\\"))
+        .unwrap_or(&path_str)
+        .to_string()
+}
+
 /// Output results in GitHub Actions workflow command format
 pub fn output(
     results: &[FileAnalysis],
@@ -26,7 +37,7 @@ pub fn output(
                 Severity::Info => "notice",
             };
 
-            let file = finding.location.file.display();
+            let file = normalize_path(&finding.location.file);
             let line = finding.location.start_line;
             let col = finding.location.start_column;
             let end_line = finding.location.end_line;

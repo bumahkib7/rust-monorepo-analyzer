@@ -115,7 +115,24 @@ pub struct AiFinding {
 
 impl AiFinding {
     pub fn to_finding(&self, file_path: PathBuf, language: Language) -> Finding {
-        Finding {
+        // Map AI confidence (0.0-1.0) to Confidence enum
+        let confidence = if self.confidence >= 0.8 {
+            rma_common::Confidence::High
+        } else if self.confidence >= 0.5 {
+            rma_common::Confidence::Medium
+        } else {
+            rma_common::Confidence::Low
+        };
+
+        // Map category string to enum
+        let category = match self.category.to_lowercase().as_str() {
+            "security" => rma_common::FindingCategory::Security,
+            "performance" => rma_common::FindingCategory::Performance,
+            "style" => rma_common::FindingCategory::Style,
+            _ => rma_common::FindingCategory::Quality,
+        };
+
+        let mut finding = Finding {
             id: format!("ai-{}-{}", self.rule_id, self.start_line),
             rule_id: format!("ai/{}", self.rule_id),
             message: format!("{}: {}", self.title, self.description),
@@ -129,7 +146,12 @@ impl AiFinding {
             language,
             snippet: None,
             suggestion: self.fix_suggestion.clone(),
-        }
+            confidence,
+            category,
+            fingerprint: None,
+        };
+        finding.compute_fingerprint();
+        finding
     }
 }
 
