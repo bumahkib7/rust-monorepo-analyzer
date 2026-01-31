@@ -92,6 +92,22 @@ pub struct RulesConfig {
     pub disable: Vec<String>,
 }
 
+/// Ruleset configuration - named groups of rules
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RulesetsConfig {
+    /// Security-focused rules
+    #[serde(default)]
+    pub security: Vec<String>,
+
+    /// Maintainability-focused rules
+    #[serde(default)]
+    pub maintainability: Vec<String>,
+
+    /// Custom rulesets defined by user
+    #[serde(flatten)]
+    pub custom: HashMap<String, Vec<String>>,
+}
+
 fn default_enable() -> Vec<String> {
     vec!["*".to_string()]
 }
@@ -274,9 +290,16 @@ fn default_baseline_file() -> PathBuf {
     PathBuf::from(".rma/baseline.json")
 }
 
+/// Current supported config version
+pub const CURRENT_CONFIG_VERSION: u32 = 1;
+
 /// Complete RMA TOML configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RmaTomlConfig {
+    /// Config format version (for future compatibility)
+    #[serde(default)]
+    pub config_version: Option<u32>,
+
     /// Scan path configuration
     #[serde(default)]
     pub scan: ScanConfig,
@@ -284,6 +307,10 @@ pub struct RmaTomlConfig {
     /// Rules configuration
     #[serde(default)]
     pub rules: RulesConfig,
+
+    /// Rulesets configuration (named groups of rules)
+    #[serde(default)]
+    pub rulesets: RulesetsConfig,
 
     /// Profiles configuration
     #[serde(default)]
@@ -306,13 +333,73 @@ pub struct RmaTomlConfig {
     pub baseline: BaselineConfig,
 }
 
+/// Result of loading a config file
+#[derive(Debug)]
+pub struct ConfigLoadResult {
+    /// The loaded configuration
+    pub config: RmaTomlConfig,
+    /// Warning if version was missing
+    pub version_warning: Option<String>,
+}
+
 impl RmaTomlConfig {
-    /// Load configuration from file
+    /// Load configuration from file with version validation
     pub fn load(path: &Path) -> Result<Self, String> {
+        let result = Self::load_with_validation(path)?;
+        Ok(result.config)
+    }
+
+    /// Load configuration from file with full validation info
+    pub fn load_with_validation(path: &Path) -> Result<ConfigLoadResult, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read config file: {}", e))?;
 
-        toml::from_str(&content).map_err(|e| format!("Failed to parse TOML: {}", e))
+        let config: RmaTomlConfig =
+            toml::from_str(&content).map_err(|e| format!("Failed to parse TOML: {}", e))?;
+
+        // Validate version
+        let version_warning = config.validate_version()?;
+
+        Ok(ConfigLoadResult {
+            config,
+            version_warning,
+        })
+    }
+
+    /// Validate config version, returns warning message if version is missing
+    fn validate_version(&self) -> Result<Option<String>, String> {
+        match self.config_version {
+            Some(CURRENT_CONFIG_VERSION) => Ok(None),
+            Some(version) if version > CURRENT_CONFIG_VERSION => {
+                Err(format!(
+                    "Unsupported config version: {}. Maximum supported version is {}. \
+                     Please upgrade RMA or use a compatible config format.",
+                    version, CURRENT_CONFIG_VERSION
+                ))
+            }
+            Some(version) => {
+                // Version 0 or any future "older than current" version
+                Err(format!(
+                    "Invalid config version: {}. Expected version {}.",
+                    version, CURRENT_CONFIG_VERSION
+                ))
+            }
+            None => Ok(Some(
+                "Config file is missing 'config_version'. Assuming version 1. \
+                 Add 'config_version = 1' to suppress this warning."
+                    .to_string(),
+            )),
+        }
+    }
+
+    /// Check if config version is present
+    pub fn has_version(&self) -> bool {
+        self.config_version.is_some()
+    }
+
+    /// Get the effective config version (defaults to 1 if missing)
+    pub fn effective_version(&self) -> u32 {
+        self.config_version.unwrap_or(CURRENT_CONFIG_VERSION)
     }
 
     /// Find and load configuration from standard locations
@@ -353,6 +440,25 @@ impl RmaTomlConfig {
     /// Validate configuration for errors and conflicts
     pub fn validate(&self) -> Vec<ConfigWarning> {
         let mut warnings = Vec::new();
+
+        // Check config version
+        if self.config_version.is_none() {
+            warnings.push(ConfigWarning {
+                level: WarningLevel::Warning,
+                message: "Missing 'config_version'. Add 'config_version = 1' to your config file."
+                    .to_string(),
+            });
+        } else if let Some(version) = self.config_version {
+            if version > CURRENT_CONFIG_VERSION {
+                warnings.push(ConfigWarning {
+                    level: WarningLevel::Error,
+                    message: format!(
+                        "Unsupported config version: {}. Maximum supported is {}.",
+                        version, CURRENT_CONFIG_VERSION
+                    ),
+                });
+            }
+        }
 
         // Check for conflicting enable/disable rules
         for disabled in &self.rules.disable {
@@ -403,12 +509,29 @@ impl RmaTomlConfig {
         warnings
     }
 
-    /// Check if a rule is enabled
+    /// Check if a rule is enabled (without ruleset filtering)
     pub fn is_rule_enabled(&self, rule_id: &str) -> bool {
-        // Check if explicitly disabled
+        self.is_rule_enabled_with_ruleset(rule_id, None)
+    }
+
+    /// Check if a rule is enabled with optional ruleset filter
+    ///
+    /// If a ruleset is specified, only rules in that ruleset are considered enabled.
+    /// Explicit disable always takes precedence.
+    pub fn is_rule_enabled_with_ruleset(&self, rule_id: &str, ruleset: Option<&str>) -> bool {
+        // Check if explicitly disabled - always takes precedence
         for pattern in &self.rules.disable {
             if Self::matches_pattern(rule_id, pattern) {
                 return false;
+            }
+        }
+
+        // If a ruleset is specified, check if rule is in that ruleset
+        if let Some(ruleset_name) = ruleset {
+            let ruleset_rules = self.get_ruleset_rules(ruleset_name);
+            if !ruleset_rules.is_empty() {
+                // Rule must be in the ruleset to be enabled
+                return ruleset_rules.iter().any(|r| Self::matches_pattern(rule_id, r));
             }
         }
 
@@ -420,6 +543,28 @@ impl RmaTomlConfig {
         }
 
         false
+    }
+
+    /// Get rules for a named ruleset
+    pub fn get_ruleset_rules(&self, name: &str) -> Vec<String> {
+        match name {
+            "security" => self.rulesets.security.clone(),
+            "maintainability" => self.rulesets.maintainability.clone(),
+            _ => self.rulesets.custom.get(name).cloned().unwrap_or_default(),
+        }
+    }
+
+    /// Get all available ruleset names
+    pub fn get_ruleset_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        if !self.rulesets.security.is_empty() {
+            names.push("security".to_string());
+        }
+        if !self.rulesets.maintainability.is_empty() {
+            names.push("maintainability".to_string());
+        }
+        names.extend(self.rulesets.custom.keys().cloned());
+        names
     }
 
     /// Get severity override for a rule
@@ -497,6 +642,9 @@ impl RmaTomlConfig {
             r#"# RMA Configuration
 # Documentation: https://github.com/bumahkib7/rust-monorepo-analyzer
 
+# Config format version (required for future compatibility)
+config_version = 1
+
 [scan]
 # Paths to include in scanning (default: all supported files)
 include = ["src/**", "lib/**", "scripts/**"]
@@ -544,6 +692,11 @@ max_complexity = 10
 max_cognitive_complexity = 15
 max_file_lines = 500
 
+[rulesets]
+# Named rule groups for targeted scanning
+security = ["js/innerhtml-xss", "js/timer-string-eval", "js/dynamic-code-execution", "rust/unsafe-block", "python/shell-injection"]
+maintainability = ["generic/long-function", "generic/high-complexity", "js/console-log"]
+
 [severity]
 # Override severity for specific rules
 # "generic/long-function" = "warning"
@@ -590,6 +743,221 @@ pub enum AllowType {
     UnsafeRust,
 }
 
+/// Source of a configuration value (for precedence tracking)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfigSource {
+    /// Built-in default value
+    Default,
+    /// From rma.toml configuration file
+    ConfigFile,
+    /// From CLI flag or environment variable
+    CliFlag,
+}
+
+impl std::fmt::Display for ConfigSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigSource::Default => write!(f, "default"),
+            ConfigSource::ConfigFile => write!(f, "config-file"),
+            ConfigSource::CliFlag => write!(f, "cli-flag"),
+        }
+    }
+}
+
+/// Effective (resolved) configuration after applying precedence
+///
+/// Precedence order (highest to lowest):
+/// 1. CLI flags (--config, --profile, --baseline-mode)
+/// 2. rma.toml in repo root (or explicit --config path)
+/// 3. Built-in defaults
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EffectiveConfig {
+    /// Source of the configuration file (if any)
+    pub config_file: Option<PathBuf>,
+
+    /// Active profile
+    pub profile: Profile,
+
+    /// Where the profile came from
+    pub profile_source: ConfigSource,
+
+    /// Resolved thresholds
+    pub thresholds: ProfileThresholds,
+
+    /// Number of enabled rules
+    pub enabled_rules_count: usize,
+
+    /// Number of disabled rules
+    pub disabled_rules_count: usize,
+
+    /// Number of severity overrides
+    pub severity_overrides_count: usize,
+
+    /// Threshold overrides (paths in order)
+    pub threshold_override_paths: Vec<String>,
+
+    /// Baseline mode
+    pub baseline_mode: BaselineMode,
+
+    /// Where baseline mode came from
+    pub baseline_mode_source: ConfigSource,
+
+    /// Exclude patterns
+    pub exclude_patterns: Vec<String>,
+
+    /// Include patterns
+    pub include_patterns: Vec<String>,
+}
+
+impl EffectiveConfig {
+    /// Build effective config from sources with proper precedence
+    pub fn resolve(
+        toml_config: Option<&RmaTomlConfig>,
+        config_path: Option<&Path>,
+        cli_profile: Option<Profile>,
+        cli_baseline_mode: bool,
+    ) -> Self {
+        // Resolve profile: CLI > config > default
+        let (profile, profile_source) = if let Some(p) = cli_profile {
+            (p, ConfigSource::CliFlag)
+        } else if let Some(cfg) = toml_config {
+            (cfg.profiles.default, ConfigSource::ConfigFile)
+        } else {
+            (Profile::default(), ConfigSource::Default)
+        };
+
+        // Resolve baseline mode: CLI > config > default
+        let (baseline_mode, baseline_mode_source) = if cli_baseline_mode {
+            (BaselineMode::NewOnly, ConfigSource::CliFlag)
+        } else if let Some(cfg) = toml_config {
+            (cfg.baseline.mode, ConfigSource::ConfigFile)
+        } else {
+            (BaselineMode::default(), ConfigSource::Default)
+        };
+
+        // Get thresholds for profile
+        let thresholds = toml_config
+            .map(|cfg| cfg.profiles.get_thresholds(profile).clone())
+            .unwrap_or_else(|| ProfileThresholds::for_profile(profile));
+
+        // Count rules
+        let (enabled_rules_count, disabled_rules_count) = toml_config
+            .map(|cfg| (cfg.rules.enable.len(), cfg.rules.disable.len()))
+            .unwrap_or((1, 0)); // default: enable = ["*"]
+
+        // Severity overrides
+        let severity_overrides_count = toml_config
+            .map(|cfg| cfg.severity.len())
+            .unwrap_or(0);
+
+        // Threshold override paths
+        let threshold_override_paths = toml_config
+            .map(|cfg| cfg.threshold_overrides.iter().map(|o| o.path.clone()).collect())
+            .unwrap_or_default();
+
+        // Patterns
+        let exclude_patterns = toml_config
+            .map(|cfg| cfg.scan.exclude.clone())
+            .unwrap_or_default();
+
+        let include_patterns = toml_config
+            .map(|cfg| cfg.scan.include.clone())
+            .unwrap_or_default();
+
+        Self {
+            config_file: config_path.map(|p| p.to_path_buf()),
+            profile,
+            profile_source,
+            thresholds,
+            enabled_rules_count,
+            disabled_rules_count,
+            severity_overrides_count,
+            threshold_override_paths,
+            baseline_mode,
+            baseline_mode_source,
+            exclude_patterns,
+            include_patterns,
+        }
+    }
+
+    /// Format as human-readable text
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+
+        out.push_str("Effective Configuration\n");
+        out.push_str("═══════════════════════════════════════════════════════════\n\n");
+
+        // Config file
+        out.push_str("  Config file:        ");
+        match &self.config_file {
+            Some(p) => out.push_str(&format!("{}\n", p.display())),
+            None => out.push_str("(none - using defaults)\n"),
+        }
+
+        // Profile
+        out.push_str(&format!(
+            "  Profile:            {} (from {})\n",
+            self.profile, self.profile_source
+        ));
+
+        // Thresholds
+        out.push_str("\n  Thresholds:\n");
+        out.push_str(&format!(
+            "    max_function_lines:     {}\n",
+            self.thresholds.max_function_lines
+        ));
+        out.push_str(&format!(
+            "    max_complexity:         {}\n",
+            self.thresholds.max_complexity
+        ));
+        out.push_str(&format!(
+            "    max_cognitive_complexity: {}\n",
+            self.thresholds.max_cognitive_complexity
+        ));
+        out.push_str(&format!(
+            "    max_file_lines:         {}\n",
+            self.thresholds.max_file_lines
+        ));
+
+        // Rules
+        out.push_str("\n  Rules:\n");
+        out.push_str(&format!(
+            "    enabled patterns:       {}\n",
+            self.enabled_rules_count
+        ));
+        out.push_str(&format!(
+            "    disabled patterns:      {}\n",
+            self.disabled_rules_count
+        ));
+        out.push_str(&format!(
+            "    severity overrides:     {}\n",
+            self.severity_overrides_count
+        ));
+
+        // Threshold overrides
+        if !self.threshold_override_paths.is_empty() {
+            out.push_str("\n  Threshold overrides:\n");
+            for path in &self.threshold_override_paths {
+                out.push_str(&format!("    - {}\n", path));
+            }
+        }
+
+        // Baseline
+        out.push_str(&format!(
+            "\n  Baseline mode:      {:?} (from {})\n",
+            self.baseline_mode, self.baseline_mode_source
+        ));
+
+        out
+    }
+
+    /// Format as JSON
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+}
+
 /// Configuration warning or error
 #[derive(Debug, Clone)]
 pub struct ConfigWarning {
@@ -603,11 +971,205 @@ pub enum WarningLevel {
     Error,
 }
 
+/// Inline suppression comment parsed from source code
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineSuppression {
+    /// The rule ID to suppress
+    pub rule_id: String,
+    /// The reason for suppression (required in strict profile)
+    pub reason: Option<String>,
+    /// Line number where the suppression comment appears
+    pub line: usize,
+    /// Type of suppression
+    pub suppression_type: SuppressionType,
+}
+
+/// Type of inline suppression
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuppressionType {
+    /// Suppresses the next line only
+    NextLine,
+    /// Suppresses until end of block/function (or file-level until blank line)
+    Block,
+}
+
+impl InlineSuppression {
+    /// Parse a suppression comment from a line of code
+    ///
+    /// Supported formats:
+    /// - `// rma-ignore-next-line <rule_id> reason="<text>"`
+    /// - `// rma-ignore <rule_id> reason="<text>"`
+    /// - `# rma-ignore-next-line <rule_id> reason="<text>"` (Python)
+    pub fn parse(line: &str, line_number: usize) -> Option<Self> {
+        let trimmed = line.trim();
+
+        // Check for comment prefixes
+        let comment_body = if let Some(rest) = trimmed.strip_prefix("//") {
+            rest.trim()
+        } else if let Some(rest) = trimmed.strip_prefix('#') {
+            rest.trim()
+        } else {
+            return None;
+        };
+
+        // Check for rma-ignore-next-line
+        if let Some(rest) = comment_body.strip_prefix("rma-ignore-next-line") {
+            return Self::parse_suppression_body(rest.trim(), line_number, SuppressionType::NextLine);
+        }
+
+        // Check for rma-ignore (block level)
+        if let Some(rest) = comment_body.strip_prefix("rma-ignore") {
+            return Self::parse_suppression_body(rest.trim(), line_number, SuppressionType::Block);
+        }
+
+        None
+    }
+
+    fn parse_suppression_body(body: &str, line_number: usize, suppression_type: SuppressionType) -> Option<Self> {
+        if body.is_empty() {
+            return None;
+        }
+
+        // Parse: <rule_id> [reason="<text>"]
+        let mut parts = body.splitn(2, ' ');
+        let rule_id = parts.next()?.trim().to_string();
+
+        if rule_id.is_empty() {
+            return None;
+        }
+
+        let reason = parts.next().and_then(|rest| {
+            // Look for reason="..."
+            if let Some(start) = rest.find("reason=\"") {
+                let after_quote = &rest[start + 8..];
+                if let Some(end) = after_quote.find('"') {
+                    return Some(after_quote[..end].to_string());
+                }
+            }
+            None
+        });
+
+        Some(Self {
+            rule_id,
+            reason,
+            line: line_number,
+            suppression_type,
+        })
+    }
+
+    /// Check if this suppression applies to a finding at the given line
+    pub fn applies_to(&self, finding_line: usize, rule_id: &str) -> bool {
+        if self.rule_id != rule_id && self.rule_id != "*" {
+            return false;
+        }
+
+        match self.suppression_type {
+            SuppressionType::NextLine => finding_line == self.line + 1,
+            SuppressionType::Block => finding_line >= self.line,
+        }
+    }
+
+    /// Validate suppression (check if reason is required and present)
+    pub fn validate(&self, require_reason: bool) -> Result<(), String> {
+        if require_reason && self.reason.is_none() {
+            return Err(format!(
+                "Suppression for '{}' at line {} requires a reason in strict profile",
+                self.rule_id, self.line
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Parse all inline suppressions from source code
+pub fn parse_inline_suppressions(content: &str) -> Vec<InlineSuppression> {
+    content
+        .lines()
+        .enumerate()
+        .filter_map(|(i, line)| InlineSuppression::parse(line, i + 1))
+        .collect()
+}
+
+/// Stable fingerprint for a finding
+///
+/// Fingerprints are designed to survive:
+/// - Line number changes (refactoring moves code)
+/// - Minor whitespace changes
+/// - Non-semantic message text changes
+///
+/// Fingerprint inputs (in order):
+/// 1. rule_id (e.g., "js/innerhtml-xss")
+/// 2. file path (normalized, unix separators)
+/// 3. normalized snippet (trimmed, collapsed whitespace)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Fingerprint(String);
+
+impl Fingerprint {
+    /// Generate a stable fingerprint for a finding
+    pub fn generate(rule_id: &str, file_path: &Path, snippet: &str) -> Self {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+
+        // 1. Rule ID
+        hasher.update(rule_id.as_bytes());
+        hasher.update(b"|");
+
+        // 2. Normalized file path (unix separators, lowercase for case-insensitive FS)
+        let normalized_path = file_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_lowercase();
+        hasher.update(normalized_path.as_bytes());
+        hasher.update(b"|");
+
+        // 3. Normalized snippet (collapse whitespace, trim)
+        let normalized_snippet = Self::normalize_snippet(snippet);
+        hasher.update(normalized_snippet.as_bytes());
+
+        let hash = hasher.finalize();
+        Self(format!("sha256:{:x}", hash))
+    }
+
+    /// Normalize snippet for stable fingerprinting
+    fn normalize_snippet(snippet: &str) -> String {
+        snippet
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string()
+    }
+
+    /// Get the fingerprint string
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Create from existing fingerprint string
+    pub fn from_string(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl std::fmt::Display for Fingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Fingerprint> for String {
+    fn from(fp: Fingerprint) -> String {
+        fp.0
+    }
+}
+
 /// Baseline entry for a finding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaselineEntry {
     pub rule_id: String,
     pub file: PathBuf,
+    #[serde(default)]
     pub line: usize,
     pub fingerprint: String,
     pub first_seen: String,
@@ -653,14 +1215,40 @@ impl Baseline {
         std::fs::write(path, content).map_err(|e| format!("Failed to write baseline: {}", e))
     }
 
-    /// Check if a finding is in the baseline
+    /// Check if a finding is in the baseline by fingerprint
+    pub fn contains_fingerprint(&self, fingerprint: &Fingerprint) -> bool {
+        self.entries.iter().any(|e| e.fingerprint == fingerprint.as_str())
+    }
+
+    /// Check if a finding is in the baseline (legacy method)
     pub fn contains(&self, rule_id: &str, file: &Path, fingerprint: &str) -> bool {
         self.entries.iter().any(|e| {
             e.rule_id == rule_id && e.file == file && e.fingerprint == fingerprint
         })
     }
 
-    /// Add a finding to the baseline
+    /// Add a finding to the baseline using stable fingerprint
+    pub fn add_with_fingerprint(
+        &mut self,
+        rule_id: String,
+        file: PathBuf,
+        line: usize,
+        fingerprint: Fingerprint,
+    ) {
+        if !self.contains_fingerprint(&fingerprint) {
+            self.entries.push(BaselineEntry {
+                rule_id,
+                file,
+                line,
+                fingerprint: fingerprint.into(),
+                first_seen: chrono::Utc::now().to_rfc3339(),
+                suppressed: false,
+                comment: None,
+            });
+        }
+    }
+
+    /// Add a finding to the baseline (legacy method)
     pub fn add(&mut self, rule_id: String, file: PathBuf, line: usize, fingerprint: String) {
         if !self.contains(&rule_id, &file, &fingerprint) {
             self.entries.push(BaselineEntry {
@@ -711,5 +1299,380 @@ mod tests {
 
         assert!(fast.max_function_lines > strict.max_function_lines);
         assert!(fast.max_complexity > strict.max_complexity);
+    }
+
+    #[test]
+    fn test_fingerprint_stable_across_line_changes() {
+        // Same finding at different line numbers should yield same fingerprint
+        let fp1 = Fingerprint::generate(
+            "js/xss-sink",
+            Path::new("src/app.js"),
+            "element.textContent = userInput;",
+        );
+        let fp2 = Fingerprint::generate(
+            "js/xss-sink",
+            Path::new("src/app.js"),
+            "element.textContent = userInput;",
+        );
+
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_fingerprint_stable_with_whitespace_changes() {
+        // Minor whitespace changes shouldn't affect fingerprint
+        let fp1 = Fingerprint::generate(
+            "generic/long-function",
+            Path::new("src/utils.rs"),
+            "fn very_long_function() {",
+        );
+        let fp2 = Fingerprint::generate(
+            "generic/long-function",
+            Path::new("src/utils.rs"),
+            "fn   very_long_function()   {",
+        );
+        let fp3 = Fingerprint::generate(
+            "generic/long-function",
+            Path::new("src/utils.rs"),
+            "  fn very_long_function() {  ",
+        );
+
+        assert_eq!(fp1, fp2);
+        assert_eq!(fp2, fp3);
+    }
+
+    #[test]
+    fn test_fingerprint_different_for_different_rules() {
+        let fp1 = Fingerprint::generate(
+            "js/xss-sink",
+            Path::new("src/app.js"),
+            "element.x = val;",
+        );
+        let fp2 = Fingerprint::generate(
+            "js/eval",
+            Path::new("src/app.js"),
+            "element.x = val;",
+        );
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_fingerprint_different_for_different_files() {
+        let fp1 = Fingerprint::generate(
+            "js/xss-sink",
+            Path::new("src/app.js"),
+            "element.x = val;",
+        );
+        let fp2 = Fingerprint::generate(
+            "js/xss-sink",
+            Path::new("src/other.js"),
+            "element.x = val;",
+        );
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_fingerprint_path_normalization() {
+        // Windows and Unix paths should normalize to same fingerprint
+        let fp1 = Fingerprint::generate(
+            "js/xss-sink",
+            Path::new("src/components/App.js"),
+            "x",
+        );
+        let fp2 = Fingerprint::generate(
+            "js/xss-sink",
+            Path::new("src\\components\\App.js"),
+            "x",
+        );
+
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_effective_config_precedence() {
+        // Test CLI overrides config
+        let toml_config = RmaTomlConfig::default();
+        let effective = EffectiveConfig::resolve(
+            Some(&toml_config),
+            Some(Path::new("rma.toml")),
+            Some(Profile::Strict),  // CLI override
+            false,
+        );
+
+        assert_eq!(effective.profile, Profile::Strict);
+        assert_eq!(effective.profile_source, ConfigSource::CliFlag);
+    }
+
+    #[test]
+    fn test_effective_config_defaults() {
+        // No config, no CLI flags = defaults
+        let effective = EffectiveConfig::resolve(None, None, None, false);
+
+        assert_eq!(effective.profile, Profile::Balanced);
+        assert_eq!(effective.profile_source, ConfigSource::Default);
+        assert!(effective.config_file.is_none());
+    }
+
+    #[test]
+    fn test_effective_config_from_file() {
+        // Config file with no CLI override
+        let mut toml_config = RmaTomlConfig::default();
+        toml_config.profiles.default = Profile::Fast;
+
+        let effective = EffectiveConfig::resolve(
+            Some(&toml_config),
+            Some(Path::new("rma.toml")),
+            None,
+            false,
+        );
+
+        assert_eq!(effective.profile, Profile::Fast);
+        assert_eq!(effective.profile_source, ConfigSource::ConfigFile);
+    }
+
+    #[test]
+    fn test_config_version_missing_warns() {
+        let toml = r#"
+[profiles]
+default = "balanced"
+"#;
+        let config: RmaTomlConfig = toml::from_str(toml).unwrap();
+        assert!(config.config_version.is_none());
+        assert!(!config.has_version());
+        assert_eq!(config.effective_version(), 1);
+
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.message.contains("Missing 'config_version'")));
+    }
+
+    #[test]
+    fn test_config_version_1_ok() {
+        let toml = r#"
+config_version = 1
+
+[profiles]
+default = "balanced"
+"#;
+        let config: RmaTomlConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.config_version, Some(1));
+        assert!(config.has_version());
+        assert_eq!(config.effective_version(), 1);
+
+        let warnings = config.validate();
+        assert!(!warnings.iter().any(|w| w.message.contains("config_version")));
+    }
+
+    #[test]
+    fn test_config_version_999_fails() {
+        let toml = r#"
+config_version = 999
+
+[profiles]
+default = "balanced"
+"#;
+        let config: RmaTomlConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.config_version, Some(999));
+
+        let warnings = config.validate();
+        let error = warnings.iter().find(|w| w.level == WarningLevel::Error);
+        assert!(error.is_some());
+        assert!(error.unwrap().message.contains("Unsupported config version: 999"));
+    }
+
+    #[test]
+    fn test_default_toml_includes_version() {
+        let toml = RmaTomlConfig::default_toml(Profile::Balanced);
+        assert!(toml.contains("config_version = 1"));
+
+        // Verify it parses correctly
+        let config: RmaTomlConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(config.config_version, Some(1));
+    }
+
+    #[test]
+    fn test_ruleset_security() {
+        let toml = r#"
+config_version = 1
+
+[rulesets]
+security = ["js/innerhtml-xss", "js/timer-string-eval"]
+maintainability = ["generic/long-function"]
+
+[rules]
+enable = ["*"]
+"#;
+        let config: RmaTomlConfig = toml::from_str(toml).unwrap();
+
+        // With security ruleset, only security rules are enabled
+        assert!(config.is_rule_enabled_with_ruleset("js/innerhtml-xss", Some("security")));
+        assert!(config.is_rule_enabled_with_ruleset("js/timer-string-eval", Some("security")));
+        assert!(!config.is_rule_enabled_with_ruleset("generic/long-function", Some("security")));
+
+        // Without ruleset, normal enable/disable applies
+        assert!(config.is_rule_enabled("generic/long-function"));
+    }
+
+    #[test]
+    fn test_ruleset_with_disable() {
+        let toml = r#"
+config_version = 1
+
+[rulesets]
+security = ["js/innerhtml-xss", "js/timer-string-eval"]
+
+[rules]
+enable = ["*"]
+disable = ["js/timer-string-eval"]
+"#;
+        let config: RmaTomlConfig = toml::from_str(toml).unwrap();
+
+        // Disable takes precedence even with ruleset
+        assert!(config.is_rule_enabled_with_ruleset("js/innerhtml-xss", Some("security")));
+        assert!(!config.is_rule_enabled_with_ruleset("js/timer-string-eval", Some("security")));
+    }
+
+    #[test]
+    fn test_get_ruleset_names() {
+        let toml = r#"
+config_version = 1
+
+[rulesets]
+security = ["js/innerhtml-xss"]
+maintainability = ["generic/long-function"]
+"#;
+        let config: RmaTomlConfig = toml::from_str(toml).unwrap();
+        let names = config.get_ruleset_names();
+
+        assert!(names.contains(&"security".to_string()));
+        assert!(names.contains(&"maintainability".to_string()));
+    }
+
+    #[test]
+    fn test_default_toml_includes_rulesets() {
+        let toml = RmaTomlConfig::default_toml(Profile::Balanced);
+        assert!(toml.contains("[rulesets]"));
+        assert!(toml.contains("security = "));
+        assert!(toml.contains("maintainability = "));
+    }
+
+    #[test]
+    fn test_inline_suppression_next_line() {
+        let suppression = InlineSuppression::parse(
+            "// rma-ignore-next-line js/innerhtml-xss reason=\"sanitized input\"",
+            10,
+        );
+        assert!(suppression.is_some());
+        let s = suppression.unwrap();
+        assert_eq!(s.rule_id, "js/innerhtml-xss");
+        assert_eq!(s.reason, Some("sanitized input".to_string()));
+        assert_eq!(s.line, 10);
+        assert_eq!(s.suppression_type, SuppressionType::NextLine);
+
+        // Should apply to line 11
+        assert!(s.applies_to(11, "js/innerhtml-xss"));
+        // Should NOT apply to line 12
+        assert!(!s.applies_to(12, "js/innerhtml-xss"));
+        // Should NOT apply to other rules
+        assert!(!s.applies_to(11, "js/console-log"));
+    }
+
+    #[test]
+    fn test_inline_suppression_block() {
+        let suppression = InlineSuppression::parse(
+            "// rma-ignore generic/long-function reason=\"legacy code\"",
+            5,
+        );
+        assert!(suppression.is_some());
+        let s = suppression.unwrap();
+        assert_eq!(s.rule_id, "generic/long-function");
+        assert_eq!(s.suppression_type, SuppressionType::Block);
+
+        // Should apply to line 5 and beyond
+        assert!(s.applies_to(5, "generic/long-function"));
+        assert!(s.applies_to(10, "generic/long-function"));
+        assert!(s.applies_to(100, "generic/long-function"));
+    }
+
+    #[test]
+    fn test_inline_suppression_without_reason() {
+        let suppression = InlineSuppression::parse(
+            "// rma-ignore-next-line js/console-log",
+            1,
+        );
+        assert!(suppression.is_some());
+        let s = suppression.unwrap();
+        assert_eq!(s.rule_id, "js/console-log");
+        assert!(s.reason.is_none());
+    }
+
+    #[test]
+    fn test_inline_suppression_python_style() {
+        let suppression = InlineSuppression::parse(
+            "# rma-ignore-next-line python/hardcoded-secret reason=\"test data\"",
+            3,
+        );
+        assert!(suppression.is_some());
+        let s = suppression.unwrap();
+        assert_eq!(s.rule_id, "python/hardcoded-secret");
+        assert_eq!(s.reason, Some("test data".to_string()));
+    }
+
+    #[test]
+    fn test_inline_suppression_validation_strict() {
+        let s = InlineSuppression {
+            rule_id: "js/xss".to_string(),
+            reason: None,
+            line: 1,
+            suppression_type: SuppressionType::NextLine,
+        };
+
+        // Without reason, strict validation fails
+        assert!(s.validate(true).is_err());
+        // Without reason, non-strict validation passes
+        assert!(s.validate(false).is_ok());
+
+        let s_with_reason = InlineSuppression {
+            rule_id: "js/xss".to_string(),
+            reason: Some("approved".to_string()),
+            line: 1,
+            suppression_type: SuppressionType::NextLine,
+        };
+
+        // With reason, both pass
+        assert!(s_with_reason.validate(true).is_ok());
+        assert!(s_with_reason.validate(false).is_ok());
+    }
+
+    #[test]
+    fn test_parse_inline_suppressions() {
+        let content = r#"
+function foo() {
+    // rma-ignore-next-line js/console-log reason="debugging"
+    console.log("test");
+
+    // rma-ignore generic/long-function reason="complex algorithm"
+    // ... lots of code ...
+}
+"#;
+        let suppressions = parse_inline_suppressions(content);
+        assert_eq!(suppressions.len(), 2);
+        assert_eq!(suppressions[0].rule_id, "js/console-log");
+        assert_eq!(suppressions[1].rule_id, "generic/long-function");
+    }
+
+    #[test]
+    fn test_suppression_does_not_affect_other_rules() {
+        let suppression = InlineSuppression::parse(
+            "// rma-ignore-next-line js/innerhtml-xss reason=\"safe\"",
+            10,
+        ).unwrap();
+
+        // Applies to the specific rule
+        assert!(suppression.applies_to(11, "js/innerhtml-xss"));
+        // Does NOT apply to other rules
+        assert!(!suppression.applies_to(11, "js/console-log"));
+        assert!(!suppression.applies_to(11, "generic/long-function"));
     }
 }

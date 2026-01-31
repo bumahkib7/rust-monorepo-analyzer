@@ -68,6 +68,8 @@ impl AnalyzerEngine {
         self.rules
             .push(Box::new(security::javascript::DynamicCodeExecutionRule));
         self.rules
+            .push(Box::new(security::javascript::TimerStringRule));
+        self.rules
             .push(Box::new(security::javascript::InnerHtmlRule));
         self.rules
             .push(Box::new(security::javascript::ConsoleLogRule));
