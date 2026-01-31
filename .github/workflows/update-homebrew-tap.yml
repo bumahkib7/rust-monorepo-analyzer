@@ -1,0 +1,122 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.2.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Validate tag format
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Invalid tag format. Expected vX.Y.Z"
+            exit 1
+          fi
+          echo "VERSION=${RELEASE_TAG#v}" >> $GITHUB_ENV
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Download macOS assets
+          gh release download "$RELEASE_TAG" \
+            --repo ${{ github.repository }} \
+            --pattern "rma-*-apple-darwin.tar.gz" \
+            --dir .
+
+          # Download Linux assets
+          gh release download "$RELEASE_TAG" \
+            --repo ${{ github.repository }} \
+            --pattern "rma-*-linux-gnu.tar.gz" \
+            --dir .
+
+          # Compute SHA256 hashes
+          echo "SHA256_MACOS_ARM=$(shasum -a 256 rma-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA256_MACOS_INTEL=$(shasum -a 256 rma-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA256_LINUX_ARM=$(shasum -a 256 rma-aarch64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA256_LINUX_INTEL=$(shasum -a 256 rma-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)" >> $GITHUB_ENV
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: bumahkib7/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          cat > homebrew-tap/Formula/rma.rb << 'FORMULA'
+          class Rma < Formula
+            desc "Ultra-fast Rust-native code intelligence and security analyzer"
+            homepage "https://github.com/bumahkib7/rust-monorepo-analyzer"
+            version "VERSION_PLACEHOLDER"
+            license any_of: ["MIT", "Apache-2.0"]
+
+            on_macos do
+              on_arm do
+                url "https://github.com/bumahkib7/rust-monorepo-analyzer/releases/download/TAG_PLACEHOLDER/rma-aarch64-apple-darwin.tar.gz"
+                sha256 "SHA256_MACOS_ARM_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/bumahkib7/rust-monorepo-analyzer/releases/download/TAG_PLACEHOLDER/rma-x86_64-apple-darwin.tar.gz"
+                sha256 "SHA256_MACOS_INTEL_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/bumahkib7/rust-monorepo-analyzer/releases/download/TAG_PLACEHOLDER/rma-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA256_LINUX_ARM_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/bumahkib7/rust-monorepo-analyzer/releases/download/TAG_PLACEHOLDER/rma-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA256_LINUX_INTEL_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "rma"
+              generate_completions_from_executable(bin/"rma", "completions")
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/rma --version")
+
+              # Test scanning a simple Rust file
+              (testpath/"test.rs").write('fn main() { println!("hello"); }')
+              output = shell_output("#{bin}/rma scan #{testpath} --format json 2>&1")
+              assert_match "findings", output
+            end
+          end
+          FORMULA
+
+          # Replace placeholders with validated values
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/TAG_PLACEHOLDER/${RELEASE_TAG}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_MACOS_ARM_PLACEHOLDER/${SHA256_MACOS_ARM}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_MACOS_INTEL_PLACEHOLDER/${SHA256_MACOS_INTEL}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_LINUX_ARM_PLACEHOLDER/${SHA256_LINUX_ARM}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_LINUX_INTEL_PLACEHOLDER/${SHA256_LINUX_INTEL}/g" homebrew-tap/Formula/rma.rb
+
+      - name: Commit and push
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add Formula/rma.rb
+          git diff --staged --quiet || git commit -m "Update rma to ${VERSION}"
+          git push
