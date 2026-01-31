@@ -1,9 +1,15 @@
 //! Output formatting utilities
 
+pub mod diagnostics;
+pub mod github;
 pub mod json;
 pub mod sarif;
 pub mod tables;
 pub mod text;
+
+// Re-export diagnostic types for convenience
+#[allow(unused_imports)]
+pub use diagnostics::{DiagnosticRenderer, RichDiagnosticRenderer, SourceCache};
 
 use crate::OutputFormat;
 use anyhow::Result;
@@ -25,6 +31,7 @@ pub fn format_results(
         OutputFormat::Sarif => sarif::output(results, output_file),
         OutputFormat::Compact => text::output_compact(results, summary, duration),
         OutputFormat::Markdown => tables::output_markdown(results, summary, duration, output_file),
+        OutputFormat::Github => github::output(results, summary, duration),
     }
 }
 

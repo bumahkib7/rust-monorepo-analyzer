@@ -53,11 +53,12 @@ docker run -v $(pwd):/workspace ghcr.io/bumahkib7/rma scan /workspace
 - **Polyglot Support**: Rust, JavaScript/TypeScript, Python, Go, Java
 - **Parallel Parsing**: Multi-threaded AST parsing with tree-sitter
 - **Security Analysis**: Detect vulnerabilities, unsafe patterns, hardcoded secrets
+- **Rich Diagnostics**: Rustc-style error output with source context and error codes
 - **AI-Powered Analysis**: Optional AI-assisted vulnerability detection with `--ai` flag
 - **Code Metrics**: Cyclomatic complexity, cognitive complexity, LOC
 - **Fast Indexing**: Tantivy-based full-text search
 - **Incremental Mode**: Only re-analyze changed files
-- **Multiple Output Formats**: Text, JSON, SARIF, Compact, Markdown
+- **Multiple Output Formats**: Text, JSON, SARIF, Compact, Markdown, GitHub
 - **Watch Mode**: Real-time analysis on file changes
 - **HTTP API**: Daemon mode for IDE integration
 - **WASM Plugins**: Extend with custom analysis rules
@@ -135,11 +136,45 @@ Options:
 
 | Format | Use Case |
 |--------|----------|
-| `text` | Human-readable terminal output with colors |
+| `text` | Human-readable terminal output with rustc-style diagnostics |
 | `json` | Machine-readable for programmatic processing |
 | `sarif` | GitHub Code Scanning, Azure DevOps integration |
 | `compact` | Minimal output for CI logs |
 | `markdown` | Documentation and reports |
+| `github` | GitHub Actions workflow commands (annotations) |
+
+### Rich Diagnostics Output
+
+RMA produces rustc-style diagnostic output with error codes, source context, and underline highlighting:
+
+```
+warning[RMA-Q501]: Function has 105 lines (max: 100) - consider refactoring
+  --> src/analyzer.rs:219:5
+217 │     }
+218 │
+219 │     fn check(&self, parsed: &ParsedFile) -> Vec<Finding> {
+    │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ function too long
+    ... (104 more lines)
+   = note: rule: generic/long-function
+
+critical[RMA-S005]: SQL query built with format! - use parameterized queries instead
+  --> src/database.rs:42:9
+40 │     let user_input = get_input();
+41 │
+42 │     format!(
+    │     ^^^^^^^^ SQL query built from untrusted input
+43 │         "SELECT * FROM users WHERE name = '{}'",
+44 │         user_input
+   = note: rule: rust/sql-injection
+```
+
+### Error Codes
+
+| Code Range | Category |
+|------------|----------|
+| RMA-S001-S999 | Security issues (unsafe, XSS, injection, etc.) |
+| RMA-Q001-Q999 | Quality issues (complexity, length, style) |
+| RMA-T001-T999 | Style issues (TODO, console.log, etc.) |
 
 ### GitHub Actions Integration
 
@@ -195,12 +230,13 @@ jobs:
 | Input | Description | Default |
 |-------|-------------|---------|
 | `path` | Path to scan | `.` |
-| `format` | Output format (text, json, sarif, compact, markdown) | `sarif` |
+| `format` | Output format (text, json, sarif, compact, markdown, github) | `sarif` |
 | `severity` | Minimum severity (info, warning, error, critical) | `warning` |
 | `languages` | Comma-separated languages to scan | (all) |
 | `ai` | Enable AI-powered analysis | `false` |
 | `verbose` | Enable verbose output | `false` |
 | `upload-sarif` | Upload SARIF to GitHub Security tab | `true` |
+| `show-annotations` | Show GitHub annotations for findings | `true` |
 | `fail-on-findings` | Fail workflow if findings detected | `false` |
 | `version` | RMA version to use | `latest` |
 
