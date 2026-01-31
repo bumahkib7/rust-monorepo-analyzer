@@ -1,7 +1,13 @@
 //! RMA Daemon - Background server for IDE integration and API access
+//!
+//! Features:
+//! - REST API for scanning and analysis
+//! - WebSocket for real-time file watching updates
+//! - Designed for IDE integration
 
 pub mod api;
 pub mod state;
+pub mod websocket;
 
 use anyhow::Result;
 use axum::{
@@ -17,6 +23,7 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use state::AppState;
+use websocket::WsState;
 
 /// Daemon configuration
 #[derive(Debug, Clone)]
@@ -49,25 +56,38 @@ pub async fn start_server(addr: &str) -> Result<()> {
 
 /// Start the daemon server with full configuration
 pub async fn start_server_with_config(config: DaemonConfig) -> Result<()> {
-    let state = Arc::new(RwLock::new(AppState::new(config.rma_config)));
+    let app_state = Arc::new(RwLock::new(AppState::new(config.rma_config)));
+    let ws_state = Arc::new(WsState::new());
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // REST API routes
+    let api_routes = Router::new()
+        .route("/scan", post(api::scan_endpoint))
+        .route("/analyze", post(api::analyze_file_endpoint))
+        .route("/search", get(api::search_endpoint))
+        .route("/stats", get(api::stats_endpoint))
+        .with_state(app_state);
+
+    // WebSocket routes
+    let ws_routes = Router::new()
+        .route("/watch", get(websocket::ws_handler))
+        .with_state(ws_state);
+
     let app = Router::new()
         .route("/health", get(health_check))
-        .route("/api/v1/scan", post(api::scan_endpoint))
-        .route("/api/v1/analyze", post(api::analyze_file_endpoint))
-        .route("/api/v1/search", get(api::search_endpoint))
-        .route("/api/v1/stats", get(api::stats_endpoint))
+        .nest("/api/v1", api_routes)
+        .nest("/ws", ws_routes)
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+        .layer(TraceLayer::new_for_http());
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     info!("Starting RMA daemon on {}", addr);
+    info!("  REST API: http://{}/api/v1/", addr);
+    info!("  WebSocket: ws://{}/ws/watch", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

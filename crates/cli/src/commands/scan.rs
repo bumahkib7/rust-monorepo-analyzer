@@ -6,7 +6,10 @@ use crate::ui::{progress, theme::Theme};
 use anyhow::Result;
 use colored::Colorize;
 use rma_analyzer::AnalyzerEngine;
-use rma_common::{Baseline, BaselineMode, Language, Profile, RmaConfig, RmaTomlConfig, Severity};
+use rma_common::{
+    Baseline, BaselineMode, Language, Profile, ProviderType, ProvidersConfig, RmaConfig,
+    RmaTomlConfig, Severity,
+};
 use rma_indexer::{IndexConfig, IndexerEngine};
 use rma_parser::ParserEngine;
 use std::path::PathBuf;
@@ -33,6 +36,8 @@ pub struct ScanArgs {
     pub include_suppressed: bool,
     pub changed_only: bool,
     pub base: String,
+    /// Comma-separated list of providers to use (rma,pmd,oxlint)
+    pub providers: Vec<String>,
 }
 
 pub fn run(args: ScanArgs) -> Result<()> {
@@ -79,9 +84,9 @@ pub fn run(args: ScanArgs) -> Result<()> {
         let before_count = parsed_files.len();
         parsed_files.retain(|f| {
             let file_path = f.path.strip_prefix(&args.path).unwrap_or(&f.path);
-            changed_files
-                .iter()
-                .any(|cf| file_path.ends_with(cf) || cf.ends_with(file_path.to_string_lossy().as_ref()))
+            changed_files.iter().any(|cf| {
+                file_path.ends_with(cf) || cf.ends_with(file_path.to_string_lossy().as_ref())
+            })
         });
 
         if !args.quiet && args.format == OutputFormat::Text && before_count != parsed_files.len() {
@@ -96,7 +101,12 @@ pub fn run(args: ScanArgs) -> Result<()> {
 
     // Phase 2: Analyze
     let analyze_start = Instant::now();
-    let (mut results, mut summary) = run_analyze_phase(&args, &config, &parsed_files)?;
+    let (mut results, mut summary) = run_analyze_phase(
+        &args,
+        &config,
+        &parsed_files,
+        toml_config.as_ref().map(|(_, c)| c),
+    )?;
     timings.push(("Analyze", analyze_start.elapsed()));
 
     // Phase 2.5: Apply baseline filtering if enabled
@@ -215,6 +225,15 @@ fn print_scan_header(args: &ScanArgs, toml_config: Option<&RmaTomlConfig>, profi
         );
     }
 
+    // Show providers if not just default
+    if args.providers.len() > 1 || (args.providers.len() == 1 && args.providers[0] != "rma") {
+        println!(
+            "  {} {}",
+            "Providers:".dimmed(),
+            args.providers.join(", ").cyan()
+        );
+    }
+
     println!();
 }
 
@@ -267,6 +286,39 @@ fn parse_language(s: &str) -> Option<Language> {
     }
 }
 
+/// Build providers config from CLI args and TOML config
+///
+/// CLI --providers flag overrides TOML config if provided.
+/// RMA native provider is always included.
+fn build_providers_config(
+    providers: &[String],
+    toml_config: Option<&RmaTomlConfig>,
+) -> ProvidersConfig {
+    // Start with TOML config or defaults
+    let mut config = toml_config.map(|c| c.providers.clone()).unwrap_or_default();
+
+    // Override enabled list from CLI if non-empty
+    if !providers.is_empty() {
+        config.enabled = providers
+            .iter()
+            .filter_map(|p| match p.trim().to_lowercase().as_str() {
+                "rma" => Some(ProviderType::Rma),
+                "pmd" => Some(ProviderType::Pmd),
+                "oxlint" | "oxc" => Some(ProviderType::Oxlint),
+                "rustsec" => Some(ProviderType::RustSec),
+                _ => None,
+            })
+            .collect();
+    }
+
+    // Ensure RMA native rules are always enabled
+    if !config.enabled.contains(&ProviderType::Rma) {
+        config.enabled.insert(0, ProviderType::Rma);
+    }
+
+    config
+}
+
 fn run_parse_phase(
     args: &ScanArgs,
     config: &RmaConfig,
@@ -297,6 +349,7 @@ fn run_analyze_phase(
     args: &ScanArgs,
     config: &RmaConfig,
     parsed_files: &[rma_parser::ParsedFile],
+    toml_config: Option<&RmaTomlConfig>,
 ) -> Result<(
     Vec<rma_analyzer::FileAnalysis>,
     rma_analyzer::AnalysisSummary,
@@ -308,8 +361,18 @@ fn run_analyze_phase(
         None
     };
 
-    let analyzer = AnalyzerEngine::new(config.clone());
-    let result = analyzer.analyze_files(parsed_files)?;
+    // Build providers config from CLI args and TOML config
+    let providers_config = build_providers_config(&args.providers, toml_config);
+
+    let analyzer = AnalyzerEngine::with_providers(config.clone(), providers_config);
+
+    // If we have external providers, use the directory-based analysis
+    let has_external_providers = args.providers.iter().any(|p| p != "rma");
+    let result = if has_external_providers {
+        analyzer.analyze_files_with_providers(parsed_files, &args.path)?
+    } else {
+        analyzer.analyze_files(parsed_files)?
+    };
 
     if let Some(s) = spinner {
         let (_results, summary) = &result;

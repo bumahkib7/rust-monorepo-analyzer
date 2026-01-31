@@ -161,7 +161,8 @@ impl RichDiagnosticRenderer {
                 "shell command built from untrusted input"
             }
             "js/eval-usage" | "js/dynamic-code-execution" => "dynamic code execution",
-            "js/innerhtml-xss" | "js/innerHTML-usage" => "potential XSS vulnerability",
+            "js/innerhtml-xss" | "js/innerHTML-usage" => "XSS sink - sanitize input",
+            "js/innerhtml-read" => "HTML property read",
             "python/exec-usage" | "python/eval-usage" | "python/dynamic-execution" => {
                 "dynamic code execution"
             }

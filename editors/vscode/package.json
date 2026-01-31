@@ -1,0 +1,99 @@
+{
+  "name": "rma-vscode",
+  "displayName": "RMA - Rust Monorepo Analyzer",
+  "description": "Security analysis and code quality for Rust, JavaScript, TypeScript, Python, Go, and Java",
+  "version": "0.6.0",
+  "publisher": "rma",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "rust",
+    "security",
+    "linter",
+    "analyzer",
+    "javascript",
+    "typescript",
+    "python",
+    "go",
+    "java"
+  ],
+  "activationEvents": [
+    "onLanguage:rust",
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascriptreact",
+    "onLanguage:python",
+    "onLanguage:go",
+    "onLanguage:java"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "RMA",
+      "properties": {
+        "rma.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable RMA analysis"
+        },
+        "rma.lspPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to rma-lsp binary. If empty, searches PATH"
+        },
+        "rma.severity": {
+          "type": "string",
+          "enum": ["info", "warning", "error", "critical"],
+          "default": "warning",
+          "description": "Minimum severity level to show"
+        },
+        "rma.enableRustsec": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable RustSec vulnerability scanning for Cargo.lock"
+        },
+        "rma.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "description": "Debounce delay in milliseconds for analysis"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "rma.restart",
+        "title": "RMA: Restart Language Server"
+      },
+      {
+        "command": "rma.analyzeWorkspace",
+        "title": "RMA: Analyze Entire Workspace"
+      },
+      {
+        "command": "rma.showOutput",
+        "title": "RMA: Show Output"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

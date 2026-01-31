@@ -125,6 +125,12 @@ pub enum Commands {
         /// Base git ref to compare against (default: origin/main)
         #[arg(long, default_value = "origin/main", requires = "changed_only")]
         base: String,
+
+        /// Analysis providers to use (comma-separated: rma,pmd,oxlint,rustsec)
+        /// Default: rma (built-in rules only)
+        /// Example: --providers rma,rustsec (enables RustSec for Rust dependency scanning)
+        #[arg(long, value_delimiter = ',', default_value = "rma")]
+        providers: Vec<String>,
     },
 
     /// Watch for file changes and re-analyze in real-time
@@ -134,8 +140,8 @@ pub enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
 
-        /// Debounce interval for file changes
-        #[arg(short, long, default_value = "500ms")]
+        /// Debounce interval for file changes (e.g., 500ms, 1s)
+        #[arg(short, long, default_value = "300ms")]
         interval: String,
 
         /// Enable AI analysis on changes
@@ -145,6 +151,26 @@ pub enum Commands {
         /// Only watch specific file patterns
         #[arg(short, long)]
         pattern: Option<String>,
+
+        /// Clear screen before each analysis
+        #[arg(long)]
+        clear: bool,
+
+        /// Suppress output (only show errors)
+        #[arg(short, long)]
+        quiet: bool,
+
+        /// Show only errors (hide warnings and info)
+        #[arg(long)]
+        errors_only: bool,
+
+        /// Skip initial scan (only show changes)
+        #[arg(long)]
+        no_initial_scan: bool,
+
+        /// Disable interactive mode (no keyboard shortcuts)
+        #[arg(long)]
+        no_interactive: bool,
     },
 
     /// Search indexed findings and code
@@ -264,16 +290,28 @@ pub enum Commands {
         detailed: bool,
     },
 
-    /// Run benchmarks
-    #[command(hide = true)]
+    /// Run benchmarks on a codebase
+    #[command(visible_alias = "benchmark")]
     Bench {
-        /// Path to benchmark
-        #[arg(default_value = ".")]
+        /// Path to benchmark (can also use --repo)
+        #[arg(default_value = ".", value_name = "PATH")]
         path: PathBuf,
+
+        /// Alias for path (for consistency with other tools)
+        #[arg(long, hide = true)]
+        repo: Option<PathBuf>,
 
         /// Number of iterations
         #[arg(short, long, default_value = "3")]
         iterations: usize,
+
+        /// Exclude patterns (glob)
+        #[arg(short = 'x', long, value_delimiter = ',')]
+        exclude: Option<Vec<String>>,
+
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text", value_enum)]
+        format: BenchFormat,
     },
 }
 
@@ -374,6 +412,14 @@ pub enum SeverityArg {
     Critical,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq)]
+pub enum BenchFormat {
+    /// Human-readable text
+    Text,
+    /// JSON format (for comparison/CI)
+    Json,
+}
+
 impl From<SeverityArg> for rma_common::Severity {
     fn from(arg: SeverityArg) -> Self {
         match arg {
@@ -436,6 +482,7 @@ fn main() -> Result<()> {
             include_suppressed,
             changed_only,
             base,
+            providers,
         } => commands::scan::run(commands::scan::ScanArgs {
             path,
             format,
@@ -456,6 +503,7 @@ fn main() -> Result<()> {
             include_suppressed,
             changed_only,
             base,
+            providers,
         }),
 
         Commands::Watch {
@@ -463,12 +511,21 @@ fn main() -> Result<()> {
             interval,
             ai,
             pattern,
+            clear,
+            quiet,
+            errors_only,
+            no_initial_scan,
+            no_interactive,
         } => commands::watch::run(commands::watch::WatchArgs {
             path,
             interval,
             ai,
             pattern,
-            quiet: cli.quiet,
+            clear,
+            quiet: quiet || cli.quiet,
+            errors_only,
+            initial_scan: !no_initial_scan,
+            interactive: !no_interactive,
         }),
 
         Commands::Search {
@@ -545,9 +602,18 @@ fn main() -> Result<()> {
             commands::doctor::run(commands::doctor::DoctorArgs { verbose: detailed })
         }
 
-        Commands::Bench { path, iterations } => {
-            commands::bench::run(commands::bench::BenchArgs { path, iterations })
-        }
+        Commands::Bench {
+            path,
+            repo,
+            iterations,
+            exclude,
+            format,
+        } => commands::bench::run(commands::bench::BenchArgs {
+            path: repo.unwrap_or(path),
+            iterations,
+            exclude,
+            format,
+        }),
     };
 
     // Handle errors with helpful suggestions

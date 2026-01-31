@@ -89,18 +89,33 @@ pub fn run(args: DoctorArgs) -> Result<()> {
     // 4. Security rules
     print_section("Security Rules");
     println!(
-        "  {} Rules available",
+        "  {} Rules available for all 6 languages",
         Theme::success_mark()
     );
     if args.verbose {
-        println!("    High-confidence sinks:");
+        println!("    Rust (High-confidence):");
         println!("      • rust/unsafe-block, rust/transmute-used");
         println!("      • rust/command-injection, rust/raw-pointer-deref");
-        println!("      • js/eval, js/innerHTML, js/setTimeout-string");
-        println!("      • py/eval, py/exec, py/subprocess-shell");
-        println!("    Review hints (low confidence):");
+        println!("    Rust (Review hints):");
         println!("      • rust/sql-injection-hint, rust/path-traversal-hint");
         println!("      • rust/unwrap-hint, rust/panic-hint");
+        println!("    JavaScript/TypeScript:");
+        println!("      • js/dynamic-code-execution, js/timer-string-eval");
+        println!("      • js/innerhtml-xss, js/console-log");
+        println!("    Python:");
+        println!("      • python/dynamic-execution, python/shell-injection");
+        println!("      • python/hardcoded-secret");
+        println!("    Go:");
+        println!("      • go/command-injection, go/sql-injection");
+        println!("      • go/unsafe-pointer, go/insecure-http");
+        println!("      • go/ignored-error-hint");
+        println!("    Java:");
+        println!("      • java/command-execution, java/sql-injection");
+        println!("      • java/insecure-deserialization, java/xxe-vulnerability");
+        println!("      • java/path-traversal, java/generic-exception-hint");
+        println!("    Generic (all languages):");
+        println!("      • generic/hardcoded-secret, generic/insecure-crypto");
+        println!("      • generic/todo-fixme, generic/long-function");
     }
 
     // 5. Plugin system

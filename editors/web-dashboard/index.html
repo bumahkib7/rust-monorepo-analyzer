@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RMA Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-card: #0f3460;
+            --text-primary: #e8e8e8;
+            --text-secondary: #a0a0a0;
+            --accent: #00d9ff;
+            --critical: #ff4757;
+            --error: #ffa502;
+            --warning: #ffdd59;
+            --info: #70a1ff;
+            --success: #2ed573;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 20px 0; border-bottom: 1px solid var(--bg-card); margin-bottom: 20px;
+        }
+
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo h1 { font-size: 24px; color: var(--accent); }
+
+        .status { display: flex; align-items: center; gap: 10px; }
+        .status-indicator {
+            width: 12px; height: 12px; border-radius: 50%; background: var(--critical);
+        }
+        .status-indicator.connected {
+            background: var(--success); animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .controls { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+
+        input, button {
+            padding: 10px 15px; border: 1px solid var(--bg-card); border-radius: 6px;
+            background: var(--bg-secondary); color: var(--text-primary);
+            font-family: inherit; font-size: 14px;
+        }
+        input { flex: 1; max-width: 400px; }
+        button { cursor: pointer; transition: all 0.2s; }
+        button:hover { background: var(--bg-card); border-color: var(--accent); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.primary { background: var(--accent); color: var(--bg-primary); border-color: var(--accent); }
+
+        .stats {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px; margin-bottom: 20px;
+        }
+        .stat-card {
+            background: var(--bg-secondary); padding: 20px; border-radius: 8px; text-align: center;
+        }
+        .stat-card .value { font-size: 32px; font-weight: bold; }
+        .stat-card .label { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; }
+        .stat-card.critical .value { color: var(--critical); }
+        .stat-card.error .value { color: var(--error); }
+        .stat-card.warning .value { color: var(--warning); }
+        .stat-card.info .value { color: var(--info); }
+
+        .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
+
+        .panel { background: var(--bg-secondary); border-radius: 8px; overflow: hidden; }
+        .panel-header {
+            background: var(--bg-card); padding: 15px 20px; font-weight: bold;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .panel-content { padding: 15px; max-height: 400px; overflow-y: auto; }
+
+        .event, .finding {
+            padding: 10px; margin-bottom: 10px; background: var(--bg-primary);
+            border-radius: 6px; border-left: 3px solid var(--accent);
+        }
+        .event .time { color: var(--text-secondary); font-size: 12px; }
+
+        .finding { border-left-color: var(--warning); }
+        .finding.critical { border-left-color: var(--critical); }
+        .finding.error { border-left-color: var(--error); }
+        .finding.info { border-left-color: var(--info); }
+
+        .finding .header { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .finding .rule { color: var(--accent); font-size: 12px; }
+        .finding .severity {
+            font-size: 11px; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;
+        }
+        .finding .severity.critical { background: var(--critical); color: white; }
+        .finding .severity.error { background: var(--error); color: white; }
+        .finding .severity.warning { background: var(--warning); color: black; }
+        .finding .severity.info { background: var(--info); color: white; }
+        .finding .message { color: var(--text-secondary); font-size: 13px; }
+        .finding .location { color: var(--text-secondary); font-size: 11px; margin-top: 5px; }
+
+        .empty { color: var(--text-secondary); text-align: center; padding: 40px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span style="font-size: 32px;">🔍</span>
+                <h1>RMA Dashboard</h1>
+            </div>
+            <div class="status">
+                <span id="status-text">Disconnected</span>
+                <div class="status-indicator" id="status-indicator"></div>
+            </div>
+        </header>
+
+        <div class="controls">
+            <input type="text" id="watch-path" placeholder="Path to watch (e.g., ./src)" value=".">
+            <button onclick="connect()" id="connect-btn" class="primary">Connect</button>
+            <button onclick="startWatch()" id="watch-btn" disabled>Start Watching</button>
+            <button onclick="stopWatch()" id="stop-btn" disabled>Stop</button>
+            <button onclick="clearAll()">Clear</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="value" id="files-count">0</div>
+                <div class="label">Files Analyzed</div>
+            </div>
+            <div class="stat-card critical">
+                <div class="value" id="critical-count">0</div>
+                <div class="label">Critical</div>
+            </div>
+            <div class="stat-card error">
+                <div class="value" id="error-count">0</div>
+                <div class="label">Errors</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="value" id="warning-count">0</div>
+                <div class="label">Warnings</div>
+            </div>
+            <div class="stat-card info">
+                <div class="value" id="info-count">0</div>
+                <div class="label">Info</div>
+            </div>
+        </div>
+
+        <div class="panels">
+            <div class="panel">
+                <div class="panel-header">
+                    <span>📡 Events</span>
+                    <span id="event-count">0</span>
+                </div>
+                <div class="panel-content" id="events">
+                    <div class="empty">No events yet. Connect and start watching.</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <span>🔒 Findings</span>
+                    <span id="findings-count">0</span>
+                </div>
+                <div class="panel-content" id="findings">
+                    <div class="empty">No findings yet.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let stats = { files: 0, critical: 0, error: 0, warning: 0, info: 0 };
+
+        function connect() {
+            ws = new WebSocket('ws://localhost:8080/ws/watch');
+
+            ws.onopen = () => {
+                setStatus(true);
+                addEvent('Connected to RMA daemon');
+                document.getElementById('watch-btn').disabled = false;
+                document.getElementById('connect-btn').disabled = true;
+
+                // Auto-start watching immediately
+                setTimeout(() => startWatch(), 100);
+            };
+
+            ws.onclose = () => {
+                setStatus(false);
+                addEvent('Disconnected from RMA daemon');
+                document.getElementById('watch-btn').disabled = true;
+                document.getElementById('stop-btn').disabled = true;
+                document.getElementById('connect-btn').disabled = false;
+            };
+
+            ws.onerror = () => addEvent('Error: Connection failed');
+            ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'Connected':
+                    addEvent('Client ID: ' + msg.data.client_id);
+                    break;
+                case 'FileChanged':
+                    addEvent('File changed: ' + msg.data.path + ' (' + msg.data.kind + ')');
+                    break;
+                case 'AnalysisComplete':
+                    stats.files++;
+                    addEvent('Analyzed: ' + msg.data.path + ' (' + msg.data.findings.length + ' findings, ' + msg.data.duration_ms + 'ms)');
+                    for (const f of msg.data.findings) {
+                        addFinding(f, msg.data.path);
+                        if (f.severity === 'critical') stats.critical++;
+                        else if (f.severity === 'error') stats.error++;
+                        else if (f.severity === 'warning') stats.warning++;
+                        else stats.info++;
+                    }
+                    updateStats();
+                    break;
+                case 'WatchingStarted':
+                    addEvent('Now watching: ' + msg.data.path);
+                    break;
+                case 'Error':
+                    addEvent('Error: ' + msg.data.message);
+                    break;
+            }
+        }
+
+        function startWatch() {
+            const path = document.getElementById('watch-path').value || '.';
+            ws.send(JSON.stringify({ command: 'Watch', data: { path } }));
+            document.getElementById('stop-btn').disabled = false;
+        }
+
+        function stopWatch() {
+            ws.send(JSON.stringify({ command: 'StopWatch' }));
+            document.getElementById('stop-btn').disabled = true;
+        }
+
+        function setStatus(connected) {
+            const indicator = document.getElementById('status-indicator');
+            const text = document.getElementById('status-text');
+            indicator.classList.toggle('connected', connected);
+            text.textContent = connected ? 'Connected' : 'Disconnected';
+        }
+
+        function addEvent(message) {
+            const container = document.getElementById('events');
+            const empty = container.querySelector('.empty');
+            if (empty) empty.remove();
+
+            const event = document.createElement('div');
+            event.className = 'event';
+
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'time';
+            timeDiv.textContent = new Date().toLocaleTimeString();
+
+            const msgDiv = document.createElement('div');
+            msgDiv.textContent = message;
+
+            event.appendChild(timeDiv);
+            event.appendChild(msgDiv);
+            container.insertBefore(event, container.firstChild);
+            document.getElementById('event-count').textContent = container.querySelectorAll('.event').length;
+        }
+
+        function addFinding(finding, filePath) {
+            const container = document.getElementById('findings');
+            const empty = container.querySelector('.empty');
+            if (empty) empty.remove();
+
+            const div = document.createElement('div');
+            div.className = 'finding ' + finding.severity;
+
+            const header = document.createElement('div');
+            header.className = 'header';
+
+            const rule = document.createElement('span');
+            rule.className = 'rule';
+            rule.textContent = finding.rule_id;
+
+            const severity = document.createElement('span');
+            severity.className = 'severity ' + finding.severity;
+            severity.textContent = finding.severity;
+
+            header.appendChild(rule);
+            header.appendChild(severity);
+
+            const message = document.createElement('div');
+            message.className = 'message';
+            message.textContent = finding.message;
+
+            const location = document.createElement('div');
+            location.className = 'location';
+            location.textContent = filePath + ':' + finding.line + ':' + finding.column;
+
+            div.appendChild(header);
+            div.appendChild(message);
+            div.appendChild(location);
+
+            container.insertBefore(div, container.firstChild);
+            document.getElementById('findings-count').textContent = container.querySelectorAll('.finding').length;
+        }
+
+        function updateStats() {
+            document.getElementById('files-count').textContent = stats.files;
+            document.getElementById('critical-count').textContent = stats.critical;
+            document.getElementById('error-count').textContent = stats.error;
+            document.getElementById('warning-count').textContent = stats.warning;
+            document.getElementById('info-count').textContent = stats.info;
+        }
+
+        function clearAll() {
+            document.getElementById('events').replaceChildren(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'No events yet.'}));
+            document.getElementById('findings').replaceChildren(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'No findings yet.'}));
+            document.getElementById('event-count').textContent = '0';
+            document.getElementById('findings-count').textContent = '0';
+            stats = { files: 0, critical: 0, error: 0, warning: 0, info: 0 };
+            updateStats();
+        }
+    </script>
+</body>
+</html>

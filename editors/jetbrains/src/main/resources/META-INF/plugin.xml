@@ -1,0 +1,50 @@
+<idea-plugin>
+    <id>com.rma.plugin</id>
+    <name>RMA - Rust Monorepo Analyzer</name>
+    <vendor email="support@rma.dev" url="https://github.com/rma">RMA</vendor>
+
+    <description><![CDATA[
+    Security analysis and code quality for Rust, JavaScript, TypeScript, Python, Go, and Java.
+
+    <b>Features:</b>
+    <ul>
+        <li>Real-time security vulnerability detection</li>
+        <li>45+ built-in security rules</li>
+        <li>RustSec advisory database integration</li>
+        <li>Multi-language support</li>
+    </ul>
+
+    <b>Requirements:</b>
+    <ul>
+        <li>RMA daemon running: <code>rma daemon --port 8080</code></li>
+    </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="com.rma.plugin.RmaService"/>
+        <externalAnnotator language="" implementationClass="com.rma.plugin.RmaAnnotator"/>
+        <notificationGroup id="RMA Notifications" displayType="BALLOON"/>
+        <projectConfigurable
+                parentId="tools"
+                instance="com.rma.plugin.RmaConfigurable"
+                id="com.rma.plugin.RmaConfigurable"
+                displayName="RMA Settings"/>
+    </extensions>
+
+    <actions>
+        <group id="RmaActions" text="RMA" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="RmaAnalyzeFile" class="com.rma.plugin.actions.AnalyzeFileAction"
+                    text="Analyze Current File" description="Run RMA analysis on current file"/>
+            <action id="RmaAnalyzeProject" class="com.rma.plugin.actions.AnalyzeProjectAction"
+                    text="Analyze Project" description="Run RMA analysis on entire project"/>
+            <separator/>
+            <action id="RmaStartDaemon" class="com.rma.plugin.actions.StartDaemonAction"
+                    text="Start RMA Daemon" description="Start the RMA daemon server"/>
+            <action id="RmaStopDaemon" class="com.rma.plugin.actions.StopDaemonAction"
+                    text="Stop RMA Daemon" description="Stop the RMA daemon server"/>
+        </group>
+    </actions>
+</idea-plugin>

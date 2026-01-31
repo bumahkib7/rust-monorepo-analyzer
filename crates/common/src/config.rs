@@ -277,6 +277,231 @@ fn default_true() -> bool {
     true
 }
 
+// =============================================================================
+// PROVIDERS CONFIGURATION
+// =============================================================================
+
+/// Available analysis providers
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderType {
+    /// Built-in RMA rules (always available)
+    Rma,
+    /// PMD for Java analysis (optional)
+    Pmd,
+    /// Oxlint for JavaScript/TypeScript (optional)
+    Oxlint,
+    /// RustSec for Rust dependency vulnerabilities (optional)
+    RustSec,
+}
+
+impl std::fmt::Display for ProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProviderType::Rma => write!(f, "rma"),
+            ProviderType::Pmd => write!(f, "pmd"),
+            ProviderType::Oxlint => write!(f, "oxlint"),
+            ProviderType::RustSec => write!(f, "rustsec"),
+        }
+    }
+}
+
+impl std::str::FromStr for ProviderType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "rma" => Ok(ProviderType::Rma),
+            "pmd" => Ok(ProviderType::Pmd),
+            "oxlint" => Ok(ProviderType::Oxlint),
+            "rustsec" => Ok(ProviderType::RustSec),
+            _ => Err(format!(
+                "Unknown provider: {}. Available: rma, pmd, oxlint",
+                s
+            )),
+        }
+    }
+}
+
+/// Providers configuration section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvidersConfig {
+    /// List of enabled providers (default: ["rma"])
+    #[serde(default = "default_enabled_providers")]
+    pub enabled: Vec<ProviderType>,
+
+    /// PMD provider configuration
+    #[serde(default)]
+    pub pmd: PmdProviderConfig,
+
+    /// Oxlint provider configuration
+    #[serde(default)]
+    pub oxlint: OxlintProviderConfig,
+}
+
+impl Default for ProvidersConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled_providers(),
+            pmd: PmdProviderConfig::default(),
+            oxlint: OxlintProviderConfig::default(),
+        }
+    }
+}
+
+fn default_enabled_providers() -> Vec<ProviderType> {
+    vec![ProviderType::Rma]
+}
+
+/// PMD Java provider configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PmdProviderConfig {
+    /// Whether PMD provider is configured (separate from enabled list)
+    #[serde(default)]
+    pub configured: bool,
+
+    /// Path to Java executable
+    #[serde(default = "default_java_path")]
+    pub java_path: String,
+
+    /// Path to PMD installation (either pmd binary or pmd-dist directory)
+    /// If empty, will try to find 'pmd' in PATH
+    #[serde(default)]
+    pub pmd_path: String,
+
+    /// PMD rulesets to use
+    #[serde(default = "default_pmd_rulesets")]
+    pub rulesets: Vec<String>,
+
+    /// Timeout for PMD execution in milliseconds
+    #[serde(default = "default_pmd_timeout")]
+    pub timeout_ms: u64,
+
+    /// File patterns to include for PMD analysis
+    #[serde(default = "default_pmd_include_patterns")]
+    pub include_patterns: Vec<String>,
+
+    /// File patterns to exclude from PMD analysis
+    #[serde(default = "default_pmd_exclude_patterns")]
+    pub exclude_patterns: Vec<String>,
+
+    /// Severity mapping from PMD priority to RMA severity
+    /// Keys: "1", "2", "3", "4", "5" (PMD priorities)
+    /// Values: "critical", "error", "warning", "info"
+    #[serde(default = "default_pmd_severity_map")]
+    pub severity_map: HashMap<String, Severity>,
+
+    /// Whether to fail the scan if PMD itself fails (not findings, but tool errors)
+    #[serde(default)]
+    pub fail_on_error: bool,
+
+    /// Minimum PMD priority to report (1=highest, 5=lowest)
+    #[serde(default = "default_pmd_min_priority")]
+    pub min_priority: u8,
+
+    /// Additional PMD command-line arguments
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+}
+
+impl Default for PmdProviderConfig {
+    fn default() -> Self {
+        Self {
+            configured: false,
+            java_path: default_java_path(),
+            pmd_path: String::new(),
+            rulesets: default_pmd_rulesets(),
+            timeout_ms: default_pmd_timeout(),
+            include_patterns: default_pmd_include_patterns(),
+            exclude_patterns: default_pmd_exclude_patterns(),
+            severity_map: default_pmd_severity_map(),
+            fail_on_error: false,
+            min_priority: default_pmd_min_priority(),
+            extra_args: Vec::new(),
+        }
+    }
+}
+
+fn default_java_path() -> String {
+    "java".to_string()
+}
+
+fn default_pmd_rulesets() -> Vec<String> {
+    vec![
+        "category/java/security.xml".to_string(),
+        "category/java/bestpractices.xml".to_string(),
+        "category/java/errorprone.xml".to_string(),
+    ]
+}
+
+fn default_pmd_timeout() -> u64 {
+    600_000 // 10 minutes
+}
+
+fn default_pmd_include_patterns() -> Vec<String> {
+    vec!["**/*.java".to_string()]
+}
+
+fn default_pmd_exclude_patterns() -> Vec<String> {
+    vec![
+        "**/target/**".to_string(),
+        "**/build/**".to_string(),
+        "**/generated/**".to_string(),
+        "**/out/**".to_string(),
+        "**/.git/**".to_string(),
+        "**/node_modules/**".to_string(),
+    ]
+}
+
+fn default_pmd_severity_map() -> HashMap<String, Severity> {
+    let mut map = HashMap::new();
+    map.insert("1".to_string(), Severity::Critical);
+    map.insert("2".to_string(), Severity::Error);
+    map.insert("3".to_string(), Severity::Warning);
+    map.insert("4".to_string(), Severity::Info);
+    map.insert("5".to_string(), Severity::Info);
+    map
+}
+
+fn default_pmd_min_priority() -> u8 {
+    5 // Report all priorities by default
+}
+
+/// Oxlint provider configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OxlintProviderConfig {
+    /// Whether Oxlint provider is configured
+    #[serde(default)]
+    pub configured: bool,
+
+    /// Path to oxlint binary (default: search PATH)
+    #[serde(default)]
+    pub binary_path: String,
+
+    /// Timeout for oxlint execution in milliseconds
+    #[serde(default = "default_oxlint_timeout")]
+    pub timeout_ms: u64,
+
+    /// Additional oxlint command-line arguments
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+}
+
+impl Default for OxlintProviderConfig {
+    fn default() -> Self {
+        Self {
+            configured: false,
+            binary_path: String::new(),
+            timeout_ms: default_oxlint_timeout(),
+            extra_args: Vec::new(),
+        }
+    }
+}
+
+fn default_oxlint_timeout() -> u64 {
+    300_000 // 5 minutes
+}
+
 /// Baseline configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BaselineConfig {
@@ -334,6 +559,10 @@ pub struct RmaTomlConfig {
     /// Baseline configuration
     #[serde(default)]
     pub baseline: BaselineConfig,
+
+    /// Analysis providers configuration
+    #[serde(default)]
+    pub providers: ProvidersConfig,
 }
 
 /// Result of loading a config file
@@ -507,7 +736,69 @@ impl RmaTomlConfig {
             }
         }
 
+        // Validate provider configuration
+        if self.providers.enabled.contains(&ProviderType::Pmd) {
+            // PMD is enabled - check if it's configured
+            if !self.providers.pmd.configured && self.providers.pmd.pmd_path.is_empty() {
+                warnings.push(ConfigWarning {
+                    level: WarningLevel::Warning,
+                    message: "PMD provider is enabled but not configured. Set [providers.pmd] configured = true or provide pmd_path.".to_string(),
+                });
+            }
+
+            // Check PMD rulesets
+            if self.providers.pmd.rulesets.is_empty() {
+                warnings.push(ConfigWarning {
+                    level: WarningLevel::Warning,
+                    message:
+                        "PMD provider has no rulesets configured. Add rulesets to [providers.pmd]."
+                            .to_string(),
+                });
+            }
+
+            // Check severity map validity
+            for priority in self.providers.pmd.severity_map.keys() {
+                if !["1", "2", "3", "4", "5"].contains(&priority.as_str()) {
+                    warnings.push(ConfigWarning {
+                        level: WarningLevel::Warning,
+                        message: format!(
+                            "Invalid PMD priority '{}' in severity_map. Valid priorities: 1-5.",
+                            priority
+                        ),
+                    });
+                }
+            }
+        }
+
+        if self.providers.enabled.contains(&ProviderType::Oxlint)
+            && !self.providers.oxlint.configured
+        {
+            warnings.push(ConfigWarning {
+                level: WarningLevel::Warning,
+                message: "Oxlint provider is enabled but not configured. Set [providers.oxlint] configured = true.".to_string(),
+            });
+        }
+
         warnings
+    }
+
+    /// Check if a specific provider is enabled
+    pub fn is_provider_enabled(&self, provider: ProviderType) -> bool {
+        self.providers.enabled.contains(&provider)
+    }
+
+    /// Get the list of enabled providers
+    pub fn get_enabled_providers(&self) -> &[ProviderType] {
+        &self.providers.enabled
+    }
+
+    /// Get PMD provider config (if PMD is enabled)
+    pub fn get_pmd_config(&self) -> Option<&PmdProviderConfig> {
+        if self.is_provider_enabled(ProviderType::Pmd) {
+            Some(&self.providers.pmd)
+        } else {
+            None
+        }
     }
 
     /// Check if a rule is enabled (without ruleset filtering)
@@ -731,6 +1022,57 @@ approved_secrets = []
 file = ".rma/baseline.json"
 # Mode: "all" or "new-only"
 mode = "all"
+
+# =============================================================================
+# ANALYSIS PROVIDERS
+# =============================================================================
+# RMA supports external analysis providers for extended language coverage.
+# Providers can be enabled/disabled individually.
+
+[providers]
+# List of enabled providers (default: only "rma" built-in rules)
+enabled = ["rma"]
+# To enable PMD for Java: enabled = ["rma", "pmd"]
+# To enable Oxlint for JS/TS: enabled = ["rma", "oxlint"]
+
+# -----------------------------------------------------------------------------
+# PMD Provider - Java Static Analysis (optional)
+# -----------------------------------------------------------------------------
+# PMD provides comprehensive Java security and quality analysis.
+# Requires: Java runtime and PMD installation
+#
+# [providers.pmd]
+# configured = true
+# java_path = "java"                    # Path to java binary
+# pmd_path = ""                         # Path to pmd binary (or leave empty to use PATH)
+# rulesets = [
+#     "category/java/security.xml",
+#     "category/java/bestpractices.xml",
+#     "category/java/errorprone.xml",
+# ]
+# timeout_ms = 600000                   # 10 minutes timeout
+# include_patterns = ["**/*.java"]
+# exclude_patterns = ["**/target/**", "**/build/**", "**/generated/**"]
+# fail_on_error = false                 # Continue scan if PMD fails
+# min_priority = 5                      # Report all priorities (1-5)
+# extra_args = []                       # Additional PMD CLI arguments
+
+# [providers.pmd.severity_map]
+# # Map PMD priority (1-5) to RMA severity
+# "1" = "critical"
+# "2" = "error"
+# "3" = "warning"
+# "4" = "info"
+# "5" = "info"
+
+# -----------------------------------------------------------------------------
+# Oxlint Provider - Fast JavaScript/TypeScript Linting (optional)
+# -----------------------------------------------------------------------------
+# [providers.oxlint]
+# configured = true
+# binary_path = ""                      # Path to oxlint binary (or leave empty to use PATH)
+# timeout_ms = 300000                   # 5 minutes timeout
+# extra_args = []
 "#,
             profile = profile,
             max_function_lines = thresholds.max_function_lines,
