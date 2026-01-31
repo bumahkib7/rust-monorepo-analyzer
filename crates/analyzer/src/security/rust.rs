@@ -267,7 +267,109 @@ impl Rule for CommandInjectionRule {
 }
 
 /// DETECTS SQL query construction with string formatting (SQL injection risk)
+/// Uses context-aware detection to reduce false positives
 pub struct SqlInjectionRule;
+
+impl SqlInjectionRule {
+    /// Check if file path suggests database context
+    fn is_db_path(path: &std::path::Path) -> bool {
+        let path_str = path.to_string_lossy().to_lowercase();
+        path_str.contains("/db/")
+            || path_str.contains("/database/")
+            || path_str.contains("/repository/")
+            || path_str.contains("/dao/")
+            || path_str.contains("/sql/")
+            || path_str.contains("/queries/")
+            || path_str.contains("_repo")
+            || path_str.ends_with("_db.rs")
+            || path_str.ends_with("_repository.rs")
+    }
+
+    /// Check if content has database imports
+    fn has_db_imports(content: &str) -> bool {
+        let db_crates = [
+            "sqlx",
+            "diesel",
+            "postgres",
+            "tokio_postgres",
+            "rusqlite",
+            "mysql",
+            "sea_orm",
+            "rbatis",
+            "deadpool_postgres",
+        ];
+        for crate_name in &db_crates {
+            if content.contains(&format!("use {}::", crate_name))
+                || content.contains(&format!("{}::", crate_name))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if the text looks like actual SQL (not documentation or markdown)
+    fn looks_like_sql(text: &str) -> bool {
+        let lower = text.to_lowercase();
+
+        // Must have SQL keywords
+        let has_sql_keyword = lower.contains("select ")
+            || lower.contains("insert into")
+            || lower.contains("update ")
+            || lower.contains("delete from")
+            || lower.contains(" where ")
+            || lower.contains(" from ");
+
+        if !has_sql_keyword {
+            return false;
+        }
+
+        // Exclude documentation/markdown patterns
+        let is_doc = lower.contains("```")
+            || lower.contains("///")
+            || lower.contains("//!")
+            || lower.contains("* select")
+            || lower.contains("# select")
+            || lower.contains("example:")
+            || lower.contains("e.g.")
+            || lower.contains("such as")
+            || text.contains("```sql");
+
+        !is_doc
+    }
+
+    /// Determine confidence based on context
+    fn determine_confidence(
+        path: &std::path::Path,
+        content: &str,
+        text: &str,
+    ) -> Option<rma_common::Confidence> {
+        let is_db_context = Self::is_db_path(path) || Self::has_db_imports(content);
+        let looks_like_sql = Self::looks_like_sql(text);
+
+        // Check for strong DB API usage indicators
+        let has_db_api = text.contains(".query")
+            || text.contains(".execute")
+            || text.contains("query!")
+            || text.contains("query_as!")
+            || text.contains(".prepare")
+            || text.contains("conn.")
+            || text.contains("client.")
+            || text.contains("pool.");
+
+        if has_db_api && looks_like_sql {
+            Some(rma_common::Confidence::High)
+        } else if is_db_context && looks_like_sql {
+            Some(rma_common::Confidence::Medium)
+        } else if looks_like_sql {
+            // Only SQL keywords, no other context - skip to avoid false positives
+            // This catches cases like markdown generation, documentation, etc.
+            None
+        } else {
+            None
+        }
+    }
+}
 
 impl Rule for SqlInjectionRule {
     fn id(&self) -> &str {
@@ -290,23 +392,27 @@ impl Rule for SqlInjectionRule {
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes()) {
                 // Check for format! with SQL keywords
                 if text.contains("format!") {
-                    let lower = text.to_lowercase();
-                    if lower.contains("select")
-                        || lower.contains("insert")
-                        || lower.contains("update")
-                        || lower.contains("delete")
-                        || lower.contains("drop")
-                        || lower.contains("exec")
+                    // Determine confidence based on context
+                    if let Some(confidence) =
+                        Self::determine_confidence(&parsed.path, &parsed.content, text)
                     {
-                        findings.push(create_finding(
+                        let severity = match confidence {
+                            rma_common::Confidence::High => Severity::Critical,
+                            rma_common::Confidence::Medium => Severity::Error,
+                            rma_common::Confidence::Low => Severity::Warning,
+                        };
+
+                        let mut finding = create_finding(
                             self.id(),
                             &node,
                             &parsed.path,
                             &parsed.content,
-                            Severity::Critical,
+                            severity,
                             "SQL query built with format! - use parameterized queries instead",
                             Language::Rust,
-                        ));
+                        );
+                        finding.confidence = confidence;
+                        findings.push(finding);
                     }
                 }
             }
@@ -316,21 +422,28 @@ impl Rule for SqlInjectionRule {
         let mut cursor2 = parsed.tree.walk();
         find_nodes_by_kind(&mut cursor2, "binary_expression", |node: Node| {
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes()) {
-                let lower = text.to_lowercase();
-                if (lower.contains("select ")
-                    || lower.contains("insert ")
-                    || lower.contains("update "))
-                    && text.contains('+')
-                {
-                    findings.push(create_finding(
-                        self.id(),
-                        &node,
-                        &parsed.path,
-                        &parsed.content,
-                        Severity::Critical,
-                        "SQL query uses string concatenation - use parameterized queries",
-                        Language::Rust,
-                    ));
+                if text.contains('+') {
+                    if let Some(confidence) =
+                        Self::determine_confidence(&parsed.path, &parsed.content, text)
+                    {
+                        let severity = match confidence {
+                            rma_common::Confidence::High => Severity::Critical,
+                            rma_common::Confidence::Medium => Severity::Error,
+                            rma_common::Confidence::Low => Severity::Warning,
+                        };
+
+                        let mut finding = create_finding(
+                            self.id(),
+                            &node,
+                            &parsed.path,
+                            &parsed.content,
+                            severity,
+                            "SQL query uses string concatenation - use parameterized queries",
+                            Language::Rust,
+                        );
+                        finding.confidence = confidence;
+                        findings.push(finding);
+                    }
                 }
             }
         });

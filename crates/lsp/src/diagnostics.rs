@@ -75,6 +75,9 @@ mod tests {
             language: rma_common::Language::Rust,
             snippet: None,
             suggestion: None,
+            confidence: rma_common::Confidence::Medium,
+            category: rma_common::FindingCategory::Security,
+            fingerprint: None,
         };
 
         let diagnostic = finding_to_diagnostic(&finding);

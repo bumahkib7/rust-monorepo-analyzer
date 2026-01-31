@@ -5,6 +5,18 @@ use rma_analyzer::FileAnalysis;
 use rma_common::Severity;
 use std::path::PathBuf;
 
+/// Normalize a file path for SARIF output
+/// Removes ./ prefix and ensures it's a clean relative path
+fn normalize_sarif_path(path: &std::path::Path) -> String {
+    let path_str = path.display().to_string();
+    // Remove leading ./ or ./
+    let normalized = path_str
+        .strip_prefix("./")
+        .or_else(|| path_str.strip_prefix(".\\"))
+        .unwrap_or(&path_str);
+    normalized.to_string()
+}
+
 /// Output results in SARIF 2.1.0 format
 pub fn output(results: &[FileAnalysis], output_file: Option<PathBuf>) -> Result<()> {
     let rules: Vec<_> = results
@@ -56,7 +68,7 @@ pub fn output(results: &[FileAnalysis], output_file: Option<PathBuf>) -> Result<
                         "locations": [{
                             "physicalLocation": {
                                 "artifactLocation": {
-                                    "uri": f.location.file.display().to_string(),
+                                    "uri": normalize_sarif_path(&f.location.file),
                                     "uriBaseId": "%SRCROOT%"
                                 },
                                 "region": {
