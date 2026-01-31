@@ -12,9 +12,13 @@ inputs:
     required: false
     default: '.'
   format:
-    description: 'Output format: text, json, sarif, compact, markdown'
+    description: 'Output format: text, json, sarif, compact, markdown, github'
     required: false
     default: 'sarif'
+  show-annotations:
+    description: 'Show GitHub annotations for findings (runs additional scan with github format)'
+    required: false
+    default: 'true'
   output-file:
     description: 'Output file path for results'
     required: false
@@ -224,6 +228,18 @@ runs:
           echo "::error::RMA scan found issues (exit code: $EXIT_CODE)"
           exit $EXIT_CODE
         fi
+
+    - name: Show GitHub Annotations
+      if: inputs.show-annotations == 'true'
+      shell: bash
+      run: |
+        # Run scan again with github format to show annotations in PR/commit
+        rma scan ${{ inputs.path }} \
+          --format github \
+          --severity ${{ inputs.severity }} \
+          --profile ${{ inputs.profile }} \
+          ${{ inputs.languages != '' && format('--languages {0}', inputs.languages) || '' }} \
+          || true  # Don't fail on findings, we already checked above
 
     - name: Upload SARIF to GitHub Security
       if: inputs.format == 'sarif' && inputs.upload-sarif == 'true'

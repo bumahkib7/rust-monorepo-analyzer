@@ -1,5 +1,6 @@
 //! Text output formatting
 
+use crate::output::diagnostics::{DiagnosticRenderer, RichDiagnosticRenderer, SourceCache};
 use crate::ui::theme::Theme;
 use anyhow::Result;
 use colored::Colorize;
@@ -206,19 +207,24 @@ fn print_details(results: &[FileAnalysis]) {
 
     println!("{}", Theme::header("DETAILS"));
     println!("{}", Theme::separator(60));
+    println!();
+
+    // Create source cache and renderer for rich diagnostics
+    let mut cache = SourceCache::new();
+    let renderer = RichDiagnosticRenderer::new();
 
     for result in findings {
-        println!();
-        println!("  {} {}", "📄".dimmed(), result.path.bright_white());
-
         for finding in &result.findings {
-            print_finding(finding);
+            let output = renderer.render(finding, &mut cache);
+            print!("{}", output);
+            println!(); // Extra newline between findings
         }
     }
-    println!();
 }
 
-fn print_finding(finding: &rma_common::Finding) {
+/// Legacy finding printer (kept for compact mode or fallback)
+#[allow(dead_code)]
+fn print_finding_simple(finding: &rma_common::Finding) {
     let severity = Theme::severity(finding.severity);
     let location = format!(
         "{}:{}",

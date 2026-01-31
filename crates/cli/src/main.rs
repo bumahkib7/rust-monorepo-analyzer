@@ -347,6 +347,8 @@ pub enum OutputFormat {
     Compact,
     /// Markdown table format
     Markdown,
+    /// GitHub Actions workflow commands
+    Github,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, PartialOrd, Ord)]
