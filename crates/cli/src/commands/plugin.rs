@@ -1,7 +1,7 @@
 //! Plugin command implementation
 
-use crate::ui::theme::Theme;
 use crate::PluginAction;
+use crate::ui::theme::Theme;
 use anyhow::Result;
 use colored::Colorize;
 use comfy_table::{Cell, Color, Table};

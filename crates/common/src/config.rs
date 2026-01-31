@@ -44,7 +44,10 @@ impl std::str::FromStr for Profile {
             "fast" => Ok(Profile::Fast),
             "balanced" => Ok(Profile::Balanced),
             "strict" => Ok(Profile::Strict),
-            _ => Err(format!("Unknown profile: {}. Use: fast, balanced, strict", s)),
+            _ => Err(format!(
+                "Unknown profile: {}. Use: fast, balanced, strict",
+                s
+            )),
         }
     }
 }
@@ -370,13 +373,11 @@ impl RmaTomlConfig {
     fn validate_version(&self) -> Result<Option<String>, String> {
         match self.config_version {
             Some(CURRENT_CONFIG_VERSION) => Ok(None),
-            Some(version) if version > CURRENT_CONFIG_VERSION => {
-                Err(format!(
-                    "Unsupported config version: {}. Maximum supported version is {}. \
+            Some(version) if version > CURRENT_CONFIG_VERSION => Err(format!(
+                "Unsupported config version: {}. Maximum supported version is {}. \
                      Please upgrade RMA or use a compatible config format.",
-                    version, CURRENT_CONFIG_VERSION
-                ))
-            }
+                version, CURRENT_CONFIG_VERSION
+            )),
             Some(version) => {
                 // Version 0 or any future "older than current" version
                 Err(format!(
@@ -531,7 +532,9 @@ impl RmaTomlConfig {
             let ruleset_rules = self.get_ruleset_rules(ruleset_name);
             if !ruleset_rules.is_empty() {
                 // Rule must be in the ruleset to be enabled
-                return ruleset_rules.iter().any(|r| Self::matches_pattern(rule_id, r));
+                return ruleset_rules
+                    .iter()
+                    .any(|r| Self::matches_pattern(rule_id, r));
             }
         }
 
@@ -628,7 +631,10 @@ impl RmaTomlConfig {
 
     fn matches_glob(path: &str, pattern: &str) -> bool {
         // Simple glob matching (supports * and **)
-        let pattern = pattern.replace("**", "§").replace('*', "[^/]*").replace('§', ".*");
+        let pattern = pattern
+            .replace("**", "§")
+            .replace('*', "[^/]*")
+            .replace('§', ".*");
         regex::Regex::new(&format!("^{}$", pattern))
             .map(|re| re.is_match(path))
             .unwrap_or(false)
@@ -847,13 +853,16 @@ impl EffectiveConfig {
             .unwrap_or((1, 0)); // default: enable = ["*"]
 
         // Severity overrides
-        let severity_overrides_count = toml_config
-            .map(|cfg| cfg.severity.len())
-            .unwrap_or(0);
+        let severity_overrides_count = toml_config.map(|cfg| cfg.severity.len()).unwrap_or(0);
 
         // Threshold override paths
         let threshold_override_paths = toml_config
-            .map(|cfg| cfg.threshold_overrides.iter().map(|o| o.path.clone()).collect())
+            .map(|cfg| {
+                cfg.threshold_overrides
+                    .iter()
+                    .map(|o| o.path.clone())
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Patterns
@@ -1014,7 +1023,11 @@ impl InlineSuppression {
 
         // Check for rma-ignore-next-line
         if let Some(rest) = comment_body.strip_prefix("rma-ignore-next-line") {
-            return Self::parse_suppression_body(rest.trim(), line_number, SuppressionType::NextLine);
+            return Self::parse_suppression_body(
+                rest.trim(),
+                line_number,
+                SuppressionType::NextLine,
+            );
         }
 
         // Check for rma-ignore (block level)
@@ -1025,7 +1038,11 @@ impl InlineSuppression {
         None
     }
 
-    fn parse_suppression_body(body: &str, line_number: usize, suppression_type: SuppressionType) -> Option<Self> {
+    fn parse_suppression_body(
+        body: &str,
+        line_number: usize,
+        suppression_type: SuppressionType,
+    ) -> Option<Self> {
         if body.is_empty() {
             return None;
         }
@@ -1217,14 +1234,16 @@ impl Baseline {
 
     /// Check if a finding is in the baseline by fingerprint
     pub fn contains_fingerprint(&self, fingerprint: &Fingerprint) -> bool {
-        self.entries.iter().any(|e| e.fingerprint == fingerprint.as_str())
+        self.entries
+            .iter()
+            .any(|e| e.fingerprint == fingerprint.as_str())
     }
 
     /// Check if a finding is in the baseline (legacy method)
     pub fn contains(&self, rule_id: &str, file: &Path, fingerprint: &str) -> bool {
-        self.entries.iter().any(|e| {
-            e.rule_id == rule_id && e.file == file && e.fingerprint == fingerprint
-        })
+        self.entries
+            .iter()
+            .any(|e| e.rule_id == rule_id && e.file == file && e.fingerprint == fingerprint)
     }
 
     /// Add a finding to the baseline using stable fingerprint
@@ -1281,8 +1300,14 @@ mod tests {
     fn test_rule_matching() {
         assert!(RmaTomlConfig::matches_pattern("security/xss", "*"));
         assert!(RmaTomlConfig::matches_pattern("security/xss", "security/*"));
-        assert!(!RmaTomlConfig::matches_pattern("generic/long", "security/*"));
-        assert!(RmaTomlConfig::matches_pattern("security/xss", "security/xss"));
+        assert!(!RmaTomlConfig::matches_pattern(
+            "generic/long",
+            "security/*"
+        ));
+        assert!(RmaTomlConfig::matches_pattern(
+            "security/xss",
+            "security/xss"
+        ));
     }
 
     #[test]
@@ -1343,32 +1368,17 @@ mod tests {
 
     #[test]
     fn test_fingerprint_different_for_different_rules() {
-        let fp1 = Fingerprint::generate(
-            "js/xss-sink",
-            Path::new("src/app.js"),
-            "element.x = val;",
-        );
-        let fp2 = Fingerprint::generate(
-            "js/eval",
-            Path::new("src/app.js"),
-            "element.x = val;",
-        );
+        let fp1 = Fingerprint::generate("js/xss-sink", Path::new("src/app.js"), "element.x = val;");
+        let fp2 = Fingerprint::generate("js/eval", Path::new("src/app.js"), "element.x = val;");
 
         assert_ne!(fp1, fp2);
     }
 
     #[test]
     fn test_fingerprint_different_for_different_files() {
-        let fp1 = Fingerprint::generate(
-            "js/xss-sink",
-            Path::new("src/app.js"),
-            "element.x = val;",
-        );
-        let fp2 = Fingerprint::generate(
-            "js/xss-sink",
-            Path::new("src/other.js"),
-            "element.x = val;",
-        );
+        let fp1 = Fingerprint::generate("js/xss-sink", Path::new("src/app.js"), "element.x = val;");
+        let fp2 =
+            Fingerprint::generate("js/xss-sink", Path::new("src/other.js"), "element.x = val;");
 
         assert_ne!(fp1, fp2);
     }
@@ -1376,16 +1386,8 @@ mod tests {
     #[test]
     fn test_fingerprint_path_normalization() {
         // Windows and Unix paths should normalize to same fingerprint
-        let fp1 = Fingerprint::generate(
-            "js/xss-sink",
-            Path::new("src/components/App.js"),
-            "x",
-        );
-        let fp2 = Fingerprint::generate(
-            "js/xss-sink",
-            Path::new("src\\components\\App.js"),
-            "x",
-        );
+        let fp1 = Fingerprint::generate("js/xss-sink", Path::new("src/components/App.js"), "x");
+        let fp2 = Fingerprint::generate("js/xss-sink", Path::new("src\\components\\App.js"), "x");
 
         assert_eq!(fp1, fp2);
     }
@@ -1397,7 +1399,7 @@ mod tests {
         let effective = EffectiveConfig::resolve(
             Some(&toml_config),
             Some(Path::new("rma.toml")),
-            Some(Profile::Strict),  // CLI override
+            Some(Profile::Strict), // CLI override
             false,
         );
 
@@ -1421,12 +1423,8 @@ mod tests {
         let mut toml_config = RmaTomlConfig::default();
         toml_config.profiles.default = Profile::Fast;
 
-        let effective = EffectiveConfig::resolve(
-            Some(&toml_config),
-            Some(Path::new("rma.toml")),
-            None,
-            false,
-        );
+        let effective =
+            EffectiveConfig::resolve(Some(&toml_config), Some(Path::new("rma.toml")), None, false);
 
         assert_eq!(effective.profile, Profile::Fast);
         assert_eq!(effective.profile_source, ConfigSource::ConfigFile);
@@ -1444,7 +1442,11 @@ default = "balanced"
         assert_eq!(config.effective_version(), 1);
 
         let warnings = config.validate();
-        assert!(warnings.iter().any(|w| w.message.contains("Missing 'config_version'")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("Missing 'config_version'"))
+        );
     }
 
     #[test]
@@ -1461,7 +1463,11 @@ default = "balanced"
         assert_eq!(config.effective_version(), 1);
 
         let warnings = config.validate();
-        assert!(!warnings.iter().any(|w| w.message.contains("config_version")));
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| w.message.contains("config_version"))
+        );
     }
 
     #[test]
@@ -1478,7 +1484,12 @@ default = "balanced"
         let warnings = config.validate();
         let error = warnings.iter().find(|w| w.level == WarningLevel::Error);
         assert!(error.is_some());
-        assert!(error.unwrap().message.contains("Unsupported config version: 999"));
+        assert!(
+            error
+                .unwrap()
+                .message
+                .contains("Unsupported config version: 999")
+        );
     }
 
     #[test]
@@ -1597,10 +1608,7 @@ maintainability = ["generic/long-function"]
 
     #[test]
     fn test_inline_suppression_without_reason() {
-        let suppression = InlineSuppression::parse(
-            "// rma-ignore-next-line js/console-log",
-            1,
-        );
+        let suppression = InlineSuppression::parse("// rma-ignore-next-line js/console-log", 1);
         assert!(suppression.is_some());
         let s = suppression.unwrap();
         assert_eq!(s.rule_id, "js/console-log");
@@ -1667,7 +1675,8 @@ function foo() {
         let suppression = InlineSuppression::parse(
             "// rma-ignore-next-line js/innerhtml-xss reason=\"safe\"",
             10,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Applies to the specific rule
         assert!(suppression.applies_to(11, "js/innerhtml-xss"));

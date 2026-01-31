@@ -3,7 +3,7 @@
 //! These rules DETECT dangerous patterns in JavaScript code for security auditing.
 //! This is a security analysis tool - it detects but does not execute dangerous code.
 
-use crate::rules::{create_finding, Rule};
+use crate::rules::{Rule, create_finding};
 use rma_common::{Finding, Language, Severity};
 use rma_parser::ParsedFile;
 use tree_sitter::Node;
@@ -277,8 +277,8 @@ where
 mod tests {
     use super::*;
     use crate::rules::Rule;
-    use rma_parser::ParserEngine;
     use rma_common::RmaConfig;
+    use rma_parser::ParserEngine;
     use std::path::Path;
 
     fn parse_js(content: &str) -> ParsedFile {
@@ -304,7 +304,10 @@ mod tests {
         let parsed = parse_js(content);
         let rule = TimerStringRule;
         let findings = rule.check(&parsed);
-        assert!(findings.is_empty(), "Function reference should not be flagged");
+        assert!(
+            findings.is_empty(),
+            "Function reference should not be flagged"
+        );
     }
 
     #[test]
@@ -326,7 +329,11 @@ mod tests {
         let parsed = parse_js(content);
         let rule = TimerStringRule;
         let findings = rule.check(&parsed);
-        assert_eq!(findings.len(), 1, "setInterval with string should be flagged");
+        assert_eq!(
+            findings.len(),
+            1,
+            "setInterval with string should be flagged"
+        );
         assert!(findings[0].message.contains("String passed to setInterval"));
     }
 
@@ -347,6 +354,9 @@ mod tests {
         let parsed = parse_js(content);
         let rule = TimerStringRule;
         let findings = rule.check(&parsed);
-        assert!(findings.is_empty(), "Function expression should not be flagged");
+        assert!(
+            findings.is_empty(),
+            "Function expression should not be flagged"
+        );
     }
 }

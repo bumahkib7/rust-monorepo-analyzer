@@ -64,10 +64,13 @@ impl AnalyzerEngine {
         self.rules.push(Box::new(security::rust::UnwrapRule));
         self.rules.push(Box::new(security::rust::PanicRule));
         self.rules.push(Box::new(security::rust::TransmuteRule));
-        self.rules.push(Box::new(security::rust::RawPointerDerefRule));
-        self.rules.push(Box::new(security::rust::CommandInjectionRule));
+        self.rules
+            .push(Box::new(security::rust::RawPointerDerefRule));
+        self.rules
+            .push(Box::new(security::rust::CommandInjectionRule));
         self.rules.push(Box::new(security::rust::SqlInjectionRule));
-        self.rules.push(Box::new(security::rust::UncheckedIndexRule));
+        self.rules
+            .push(Box::new(security::rust::UncheckedIndexRule));
         self.rules.push(Box::new(security::rust::PathTraversalRule));
 
         // JavaScript rules - DETECT dangerous patterns
@@ -210,9 +213,11 @@ fn risky_function() {
         let analysis = analyzer.analyze_file(&parsed).unwrap();
 
         // Should detect the unsafe block
-        assert!(analysis
-            .findings
-            .iter()
-            .any(|f| f.rule_id.contains("unsafe")));
+        assert!(
+            analysis
+                .findings
+                .iter()
+                .any(|f| f.rule_id.contains("unsafe"))
+        );
     }
 }

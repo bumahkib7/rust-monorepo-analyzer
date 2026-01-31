@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tantivy::schema::*;
-use tantivy::{doc, Index, IndexWriter};
+use tantivy::{Index, IndexWriter, doc};
 use tracing::{info, instrument};
 
 /// Index configuration

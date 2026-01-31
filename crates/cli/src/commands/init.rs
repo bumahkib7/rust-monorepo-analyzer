@@ -25,7 +25,10 @@ pub fn run(args: InitArgs) -> Result<()> {
             Theme::warning_mark()
         );
         if config_file.exists() {
-            println!("  Config file: {}", config_file.display().to_string().cyan());
+            println!(
+                "  Config file: {}",
+                config_file.display().to_string().cyan()
+            );
         }
         println!("  Use {} to reinitialize", "--force".yellow());
         return Ok(());
@@ -102,11 +105,7 @@ cache/
     println!("{} RMA initialized successfully!", Theme::success_mark());
     println!();
     println!("  {}", "Configuration:".cyan().bold());
-    println!(
-        "  {} Config file: {}",
-        Theme::bullet(),
-        "rma.toml".yellow()
-    );
+    println!("  {} Config file: {}", Theme::bullet(), "rma.toml".yellow());
     println!(
         "  {} Profile: {} ({})",
         Theme::bullet(),

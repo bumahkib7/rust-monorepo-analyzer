@@ -55,11 +55,7 @@ fn diagnostic_tags(finding: &Finding) -> Option<Vec<DiagnosticTag>> {
         tags.push(DiagnosticTag::DEPRECATED);
     }
 
-    if tags.is_empty() {
-        None
-    } else {
-        Some(tags)
-    }
+    if tags.is_empty() { None } else { Some(tags) }
 }
 
 #[cfg(test)]

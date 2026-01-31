@@ -6,11 +6,11 @@
 pub mod config;
 
 pub use config::{
-    parse_inline_suppressions, AllowConfig, AllowType, Baseline, BaselineConfig, BaselineEntry,
-    BaselineMode, ConfigLoadResult, ConfigSource, ConfigWarning, EffectiveConfig, Fingerprint,
-    InlineSuppression, Profile, ProfileThresholds, ProfilesConfig, RmaTomlConfig, RulesConfig,
-    RulesetsConfig, ScanConfig, SuppressionType, ThresholdOverride, WarningLevel,
-    CURRENT_CONFIG_VERSION,
+    AllowConfig, AllowType, Baseline, BaselineConfig, BaselineEntry, BaselineMode,
+    CURRENT_CONFIG_VERSION, ConfigLoadResult, ConfigSource, ConfigWarning, EffectiveConfig,
+    Fingerprint, InlineSuppression, Profile, ProfileThresholds, ProfilesConfig, RmaTomlConfig,
+    RulesConfig, RulesetsConfig, ScanConfig, SuppressionType, ThresholdOverride, WarningLevel,
+    parse_inline_suppressions,
 };
 
 use serde::{Deserialize, Serialize};

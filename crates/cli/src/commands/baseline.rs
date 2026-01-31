@@ -102,7 +102,9 @@ pub fn run(args: BaselineArgs) -> Result<()> {
     }
 
     // Save baseline
-    baseline.save(&output_path).map_err(|e| anyhow::anyhow!(e))?;
+    baseline
+        .save(&output_path)
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     let duration = start.elapsed();
 
@@ -178,11 +180,7 @@ pub fn show_stats(path: &std::path::Path) -> Result<()> {
     println!("{}", Theme::separator(60));
     println!();
 
-    println!(
-        "  {} Version: {}",
-        Theme::bullet(),
-        baseline.version.cyan()
-    );
+    println!("  {} Version: {}", Theme::bullet(), baseline.version.cyan());
     println!(
         "  {} Created: {}",
         Theme::bullet(),

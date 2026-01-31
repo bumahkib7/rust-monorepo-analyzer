@@ -1,9 +1,9 @@
 //! API endpoints for the daemon
 
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
-    Json,
 };
 use rma_analyzer::FileAnalysis;
 use serde::{Deserialize, Serialize};

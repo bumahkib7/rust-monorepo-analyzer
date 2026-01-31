@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use tower_lsp::{LspService, Server};
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod backend;

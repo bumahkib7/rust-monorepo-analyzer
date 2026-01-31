@@ -8,7 +8,7 @@ mod ui;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 use colored::Colorize;
 use std::io;
 use std::path::PathBuf;

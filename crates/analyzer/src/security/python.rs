@@ -3,7 +3,7 @@
 //! This module contains STATIC ANALYSIS rules that scan Python source code
 //! to identify potential security vulnerabilities. It does NOT execute any code.
 
-use crate::rules::{create_finding, Rule};
+use crate::rules::{Rule, create_finding};
 use rma_common::{Finding, Language, Severity};
 use rma_parser::ParsedFile;
 use tree_sitter::Node;
