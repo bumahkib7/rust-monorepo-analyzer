@@ -59,14 +59,10 @@ impl MetricsCollector {
             import_count: 0,
         }
     }
-}
 
-impl AstVisitor for MetricsCollector {
-    fn visit_node(&mut self, node: Node, _content: &str) {
-        let kind = node.kind();
-
-        // Count complexity-increasing constructs
-        let is_branch = match self.language {
+    /// Check if a node kind represents a branching construct that increases complexity
+    fn is_branch(&self, kind: &str) -> bool {
+        match self.language {
             Language::Rust => matches!(
                 kind,
                 "if_expression"
@@ -116,15 +112,12 @@ impl AstVisitor for MetricsCollector {
                     | "ternary_expression"
             ),
             Language::Unknown => false,
-        };
-
-        if is_branch {
-            self.complexity += 1;
-            self.cognitive_complexity += 1 + self.nesting_depth;
         }
+    }
 
-        // Track nesting for cognitive complexity
-        let increases_nesting = match self.language {
+    /// Check if a node kind increases nesting depth for cognitive complexity
+    fn increases_nesting(&self, kind: &str) -> bool {
+        match self.language {
             Language::Rust => matches!(
                 kind,
                 "function_item" | "if_expression" | "match_expression" | "loop_expression"
@@ -142,14 +135,12 @@ impl AstVisitor for MetricsCollector {
                 "function_definition" | "class_definition" | "if_statement" | "for_statement"
             ),
             _ => false,
-        };
-
-        if increases_nesting {
-            self.nesting_depth += 1;
         }
+    }
 
-        // Count definitions
-        let is_function = match self.language {
+    /// Check if a node kind represents a function definition
+    fn is_function(&self, kind: &str) -> bool {
+        match self.language {
             Language::Rust => matches!(kind, "function_item"),
             Language::JavaScript | Language::TypeScript => {
                 matches!(
@@ -161,35 +152,56 @@ impl AstVisitor for MetricsCollector {
             Language::Go => matches!(kind, "function_declaration" | "method_declaration"),
             Language::Java => matches!(kind, "method_declaration" | "constructor_declaration"),
             Language::Unknown => false,
-        };
-
-        if is_function {
-            self.function_count += 1;
         }
+    }
 
-        let is_class = match self.language {
+    /// Check if a node kind represents a class/struct definition
+    fn is_class(&self, kind: &str) -> bool {
+        match self.language {
             Language::Rust => matches!(kind, "struct_item" | "enum_item"),
             Language::JavaScript | Language::TypeScript => kind == "class_declaration",
             Language::Python => kind == "class_definition",
             Language::Go => kind == "type_declaration",
             Language::Java => matches!(kind, "class_declaration" | "interface_declaration"),
             Language::Unknown => false,
-        };
-
-        if is_class {
-            self.class_count += 1;
         }
+    }
 
-        let is_import = match self.language {
+    /// Check if a node kind represents an import statement
+    fn is_import(&self, kind: &str) -> bool {
+        match self.language {
             Language::Rust => matches!(kind, "use_declaration" | "extern_crate_declaration"),
             Language::JavaScript | Language::TypeScript => kind == "import_statement",
             Language::Python => matches!(kind, "import_statement" | "import_from_statement"),
             Language::Go => kind == "import_declaration",
             Language::Java => kind == "import_declaration",
             Language::Unknown => false,
-        };
+        }
+    }
+}
 
-        if is_import {
+impl AstVisitor for MetricsCollector {
+    fn visit_node(&mut self, node: Node, _content: &str) {
+        let kind = node.kind();
+
+        if self.is_branch(kind) {
+            self.complexity += 1;
+            self.cognitive_complexity += 1 + self.nesting_depth;
+        }
+
+        if self.increases_nesting(kind) {
+            self.nesting_depth += 1;
+        }
+
+        if self.is_function(kind) {
+            self.function_count += 1;
+        }
+
+        if self.is_class(kind) {
+            self.class_count += 1;
+        }
+
+        if self.is_import(kind) {
             self.import_count += 1;
         }
     }
