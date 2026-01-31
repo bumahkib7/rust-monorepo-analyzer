@@ -4,14 +4,16 @@
 //! - RMA-S### for Security issues
 //! - RMA-Q### for Quality issues
 //! - RMA-T### for Style/lint issues
+//! - RMA-J### for Java external tool findings (PMD)
 //!
 //! Number ranges:
 //! - 001-099: Rust
 //! - 101-199: JavaScript/TypeScript
 //! - 201-299: Python
 //! - 301-399: Go
-//! - 401-499: Java
+//! - 401-499: Java (native rules)
 //! - 501-599: Generic (cross-language)
+//! - 601-699: PMD Java rules
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -25,6 +27,8 @@ pub enum Category {
     Quality,
     /// Style and lint issues
     Style,
+    /// Java external tool findings (PMD)
+    Pmd,
 }
 
 impl Category {
@@ -34,6 +38,7 @@ impl Category {
             Category::Security => 'S',
             Category::Quality => 'Q',
             Category::Style => 'T',
+            Category::Pmd => 'J',
         }
     }
 }
@@ -143,6 +148,7 @@ pub static REGISTRY: LazyLock<DiagnosticCodeRegistry> = LazyLock::new(|| {
     r.register("js/timer-string-eval", Category::Security, 103);
     r.register("js/innerhtml-xss", Category::Security, 104);
     r.register("js/innerHTML-usage", Category::Security, 104);
+    r.register("js/innerhtml-read", Category::Style, 111);
     r.register("js/document-write", Category::Security, 105);
     r.register("js/prototype-pollution", Category::Security, 106);
     r.register("js/sql-injection", Category::Security, 107);
@@ -218,6 +224,70 @@ pub static REGISTRY: LazyLock<DiagnosticCodeRegistry> = LazyLock::new(|| {
     r.register("generic/missing-docs", Category::Style, 502);
     r.register("generic/inconsistent-naming", Category::Style, 503);
 
+    // =========================================
+    // PMD Java Rules (J001-J999)
+    // External tool findings from PMD
+    // =========================================
+
+    // Security Rules (J001-J099)
+    r.register("pmd/java/AvoidUsingHardCodedURL", Category::Pmd, 1);
+    r.register("pmd/java/HardcodedPassword", Category::Pmd, 2);
+    r.register("pmd/java/HardCodedCryptoKey", Category::Pmd, 3);
+    r.register("pmd/java/InsecureCryptoIv", Category::Pmd, 4);
+    r.register("pmd/java/AvoidUsingNativeCode", Category::Pmd, 5);
+
+    // Error Prone Rules (J101-J199)
+    r.register("pmd/java/NullAssignment", Category::Pmd, 101);
+    r.register("pmd/java/MissingBreakInSwitch", Category::Pmd, 102);
+    r.register("pmd/java/BrokenNullCheck", Category::Pmd, 103);
+    r.register("pmd/java/CloseResource", Category::Pmd, 104);
+    r.register("pmd/java/CompareObjectsWithEquals", Category::Pmd, 105);
+    r.register("pmd/java/EqualsNull", Category::Pmd, 106);
+    r.register("pmd/java/EmptyTryBlock", Category::Pmd, 107);
+    r.register("pmd/java/EmptyCatchBlock", Category::Pmd, 108);
+    r.register("pmd/java/AvoidCatchingThrowable", Category::Pmd, 109);
+
+    // Best Practices Rules (J201-J299)
+    r.register("pmd/java/UnusedLocalVariable", Category::Pmd, 201);
+    r.register("pmd/java/UnusedPrivateField", Category::Pmd, 202);
+    r.register("pmd/java/UnusedPrivateMethod", Category::Pmd, 203);
+    r.register("pmd/java/UnusedFormalParameter", Category::Pmd, 204);
+    r.register("pmd/java/AvoidReassigningParameters", Category::Pmd, 205);
+    r.register("pmd/java/SystemPrintln", Category::Pmd, 206);
+    r.register("pmd/java/AvoidPrintStackTrace", Category::Pmd, 207);
+    r.register("pmd/java/SwitchStmtsShouldHaveDefault", Category::Pmd, 208);
+
+    // Performance Rules (J301-J399)
+    r.register("pmd/java/StringInstantiation", Category::Pmd, 301);
+    r.register("pmd/java/StringToString", Category::Pmd, 302);
+    r.register(
+        "pmd/java/UseStringBufferForStringAppends",
+        Category::Pmd,
+        303,
+    );
+    r.register("pmd/java/InefficientStringBuffering", Category::Pmd, 304);
+    r.register("pmd/java/SimplifyStartsWith", Category::Pmd, 305);
+    r.register("pmd/java/UseArrayListInsteadOfVector", Category::Pmd, 306);
+    r.register("pmd/java/BigIntegerInstantiation", Category::Pmd, 307);
+
+    // Design Rules (J401-J499)
+    r.register("pmd/java/TooManyMethods", Category::Pmd, 401);
+    r.register("pmd/java/TooManyFields", Category::Pmd, 402);
+    r.register("pmd/java/ExcessiveMethodLength", Category::Pmd, 403);
+    r.register("pmd/java/ExcessiveClassLength", Category::Pmd, 404);
+    r.register("pmd/java/CyclomaticComplexity", Category::Pmd, 405);
+    r.register("pmd/java/NPathComplexity", Category::Pmd, 406);
+    r.register("pmd/java/CouplingBetweenObjects", Category::Pmd, 407);
+    r.register("pmd/java/GodClass", Category::Pmd, 408);
+    r.register("pmd/java/LawOfDemeter", Category::Pmd, 409);
+
+    // Code Style Rules (J501-J599)
+    r.register("pmd/java/ShortVariable", Category::Pmd, 501);
+    r.register("pmd/java/LongVariable", Category::Pmd, 502);
+    r.register("pmd/java/MethodNamingConventions", Category::Pmd, 503);
+    r.register("pmd/java/ClassNamingConventions", Category::Pmd, 504);
+    r.register("pmd/java/UnnecessaryModifier", Category::Pmd, 505);
+
     r
 });
 
@@ -243,5 +313,20 @@ mod tests {
         assert_eq!(Category::Security.prefix(), 'S');
         assert_eq!(Category::Quality.prefix(), 'Q');
         assert_eq!(Category::Style.prefix(), 'T');
+        assert_eq!(Category::Pmd.prefix(), 'J');
+    }
+
+    #[test]
+    fn test_pmd_rule() {
+        let code = REGISTRY.get("pmd/java/HardcodedPassword");
+        assert_eq!(code.code, "RMA-J002");
+        assert_eq!(code.category, Category::Pmd);
+    }
+
+    #[test]
+    fn test_unknown_pmd_rule_generates_code() {
+        // Unknown PMD rules get a hashed code in Q9xx range
+        let code = REGISTRY.get("pmd/java/SomeUnknownRule");
+        assert!(code.code.starts_with("RMA-Q9"));
     }
 }

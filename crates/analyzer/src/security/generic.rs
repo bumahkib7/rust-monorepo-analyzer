@@ -10,29 +10,39 @@ use std::sync::LazyLock;
 use tree_sitter::Node;
 
 // Regex patterns for security checks
+//
+// IMPORTANT: These patterns are designed to minimize false positives.
+// We only match SPECIFIC secret patterns, not generic "key" or "token" words.
+
+/// Matches specific secret variable assignments like `api_key = "..."` or `password: "..."`
+/// Note: Requires the variable name to be a COMPOUND secret name (api_key, secret_key, etc.)
+/// NOT just "key" or "token" alone which are too generic.
 static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)(api[_-]?key|secret[_-]?key|password|passwd|token|auth[_-]?token|private[_-]?key|access[_-]?key|client[_-]?secret)\s*[:=]\s*["'][^"']{8,}["']"#).unwrap()
+    Regex::new(r#"(?i)\b(api[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token|private[_-]?key|access[_-]?key|client[_-]?secret|db[_-]?password|database[_-]?password|admin[_-]?password)\s*[:=]\s*["'][^"']{8,}["']"#).unwrap()
 });
 
+/// Matches AWS access key IDs (always start with AKIA)
 static AWS_KEY_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"AKIA[0-9A-Z]{16}"#).unwrap());
 
+/// Matches AWS secret access keys with the variable name
 static AWS_SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*["'][A-Za-z0-9/+=]{40}["']"#)
         .unwrap()
 });
 
+/// Matches GitHub personal access tokens (ghp_) and GitHub app tokens (ghs_)
 static GITHUB_TOKEN_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"gh[ps]_[A-Za-z0-9]{36,}"#).unwrap());
 
+/// Matches PEM-encoded private keys
 static PRIVATE_KEY_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"#).unwrap());
 
-static GENERIC_SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)(secret|password|passwd|pwd|token|key|credential|auth)\s*[:=]\s*["'][^"']{12,}["']"#,
-    )
-    .unwrap()
+/// Matches password assignments with actual password values (not empty, not placeholders)
+/// More restrictive: only `password` or `passwd` followed by a value that looks like a real password
+static PASSWORD_ASSIGNMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\b(password|passwd|pwd)\s*[:=]\s*["']([^"']{6,})["']"#).unwrap()
 });
 
 /// DETECTS TODO/FIXME comments that may indicate incomplete code
@@ -159,6 +169,122 @@ impl HighComplexityRule {
     }
 }
 
+/// DETECTS duplicate functions (copy-paste code)
+pub struct DuplicateFunctionRule {
+    min_lines: usize,
+}
+
+impl DuplicateFunctionRule {
+    pub fn new(min_lines: usize) -> Self {
+        Self { min_lines }
+    }
+
+    /// Extract and normalize just the function body (inside braces) for comparison
+    fn normalize_body(content: &str, node: &Node) -> String {
+        // Find the block/body child node (the part inside braces)
+        let mut cursor = node.walk();
+        let mut body_node: Option<Node> = None;
+
+        if cursor.goto_first_child() {
+            loop {
+                let child = cursor.node();
+                // Look for block-like nodes that contain the function body
+                if child.kind() == "block"
+                    || child.kind() == "statement_block"
+                    || child.kind() == "compound_statement"
+                    || child.kind() == "function_body"
+                {
+                    body_node = Some(child);
+                    break;
+                }
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+        }
+
+        let body = if let Some(bn) = body_node {
+            let start = bn.start_byte();
+            let end = bn.end_byte();
+            if end <= content.len() && start < end {
+                &content[start..end]
+            } else {
+                return String::new();
+            }
+        } else {
+            // Fallback: use entire node but try to skip signature
+            let start = node.start_byte();
+            let end = node.end_byte();
+            if end > content.len() || start >= end {
+                return String::new();
+            }
+            &content[start..end]
+        };
+
+        // Normalize: remove whitespace, lowercase, strip comments
+        let mut result = String::new();
+        let mut in_line_comment = false;
+        let mut in_block_comment = false;
+        let mut prev_char = ' ';
+
+        for c in body.chars() {
+            if in_line_comment {
+                if c == '\n' {
+                    in_line_comment = false;
+                }
+                continue;
+            }
+            if in_block_comment {
+                if prev_char == '*' && c == '/' {
+                    in_block_comment = false;
+                }
+                prev_char = c;
+                continue;
+            }
+            if prev_char == '/' && c == '/' {
+                in_line_comment = true;
+                result.pop(); // remove the first /
+                continue;
+            }
+            if prev_char == '/' && c == '*' {
+                in_block_comment = true;
+                result.pop(); // remove the first /
+                continue;
+            }
+            if !c.is_whitespace() {
+                result.push(c.to_ascii_lowercase());
+            }
+            prev_char = c;
+        }
+
+        result
+    }
+
+    /// Get function name from node
+    fn get_function_name(node: &Node, content: &str) -> Option<String> {
+        let mut cursor = node.walk();
+        if cursor.goto_first_child() {
+            loop {
+                let child = cursor.node();
+                if child.kind() == "identifier"
+                    || child.kind() == "name"
+                    || child.kind() == "property_identifier"
+                {
+                    let start = child.start_byte();
+                    let end = child.end_byte();
+                    if end <= content.len() {
+                        return Some(content[start..end].to_string());
+                    }
+                }
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+        }
+        None
+    }
+}
+
 impl Rule for HighComplexityRule {
     fn id(&self) -> &str {
         "generic/high-complexity"
@@ -205,8 +331,217 @@ impl Rule for HighComplexityRule {
     }
 }
 
+impl Rule for DuplicateFunctionRule {
+    fn id(&self) -> &str {
+        "generic/duplicate-function"
+    }
+
+    fn description(&self) -> &str {
+        "Detects duplicate functions that could be refactored"
+    }
+
+    fn applies_to(&self, _lang: Language) -> bool {
+        true
+    }
+
+    fn check(&self, parsed: &ParsedFile) -> Vec<Finding> {
+        use std::collections::HashMap;
+
+        let mut findings = Vec::new();
+        let mut cursor = parsed.tree.walk();
+
+        let function_kinds = [
+            "function_item",
+            "function_declaration",
+            "function_definition",
+            "method_declaration",
+            "arrow_function",
+        ];
+
+        // Collect all functions with their normalized bodies
+        struct FuncInfo {
+            name: String,
+            line: usize,
+            col: usize,
+        }
+
+        let mut body_to_funcs: HashMap<String, Vec<FuncInfo>> = HashMap::new();
+
+        find_nodes_by_kinds(&mut cursor, &function_kinds, |node: Node| {
+            let start = node.start_position().row;
+            let end = node.end_position().row;
+            let lines = end - start + 1;
+
+            // Only check functions above minimum line threshold
+            if lines < self.min_lines {
+                return;
+            }
+
+            let normalized = Self::normalize_body(&parsed.content, &node);
+            if normalized.len() < 50 {
+                // Skip very small functions
+                return;
+            }
+
+            let name = Self::get_function_name(&node, &parsed.content)
+                .unwrap_or_else(|| format!("anonymous@{}", start + 1));
+
+            body_to_funcs.entry(normalized).or_default().push(FuncInfo {
+                name,
+                line: start + 1,
+                col: node.start_position().column + 1,
+            });
+        });
+
+        // Report duplicates
+        for (_body, funcs) in body_to_funcs.iter() {
+            if funcs.len() > 1 {
+                // Report all but the first as duplicates
+                let first = &funcs[0];
+                for dup in funcs.iter().skip(1) {
+                    let mut finding = Finding {
+                        id: format!("{}-{}-{}", self.id(), dup.line, dup.col),
+                        rule_id: self.id().to_string(),
+                        message: format!(
+                            "Function '{}' is a duplicate of '{}' at line {} - consider extracting to shared function",
+                            dup.name, first.name, first.line
+                        ),
+                        severity: Severity::Warning,
+                        location: rma_common::SourceLocation::new(
+                            parsed.path.clone(),
+                            dup.line,
+                            dup.col,
+                            dup.line,
+                            dup.col + 10,
+                        ),
+                        language: parsed.language,
+                        snippet: Some(format!("fn {}(...)", dup.name)),
+                        suggestion: Some(format!(
+                            "Extract shared logic from '{}' and '{}'",
+                            first.name, dup.name
+                        )),
+                        confidence: rma_common::Confidence::High,
+                        category: rma_common::FindingCategory::Style,
+                        fingerprint: None,
+                    };
+                    finding.compute_fingerprint();
+                    findings.push(finding);
+                }
+            }
+        }
+
+        findings
+    }
+}
+
 /// DETECTS hardcoded secrets, API keys, and passwords in any language
+///
+/// This rule focuses on HIGH-CONFIDENCE detection to minimize false positives.
+/// It looks for:
+/// - Specific secret patterns (api_key, secret_key, auth_token, etc.)
+/// - Known credential formats (AWS keys, GitHub tokens, private keys)
+/// - Password assignments with actual values
+///
+/// It does NOT flag:
+/// - Generic "key" or "token" variable names (too many false positives)
+/// - Object property keys (accessorKey, storageKey, etc.)
+/// - HTTP header names
+/// - Configuration constants that aren't secrets
 pub struct HardcodedSecretRule;
+
+impl HardcodedSecretRule {
+    /// Check if a password value looks like a real password (not a placeholder)
+    fn is_real_password(value: &str) -> bool {
+        // Skip obvious placeholders and test values
+        let lower = value.to_lowercase();
+        if lower.is_empty()
+            || lower == "password"
+            || lower == "changeme"
+            || lower == "placeholder"
+            || lower == "your_password"
+            || lower == "your-password"
+            || lower == "xxx"
+            || lower == "***"
+            || lower.starts_with("${")
+            || lower.starts_with("{{")
+            || lower.contains("example")
+            || lower.contains("test")
+            || lower.contains("dummy")
+            || lower.contains("sample")
+            || lower.contains("fake")
+            || lower.contains("mock")
+        {
+            return false;
+        }
+
+        // A real password typically has mixed characters or is long enough
+        // to suggest it's not just a simple word
+        let has_digit = value.chars().any(|c| c.is_ascii_digit());
+        let has_upper = value.chars().any(|c| c.is_ascii_uppercase());
+        let has_lower = value.chars().any(|c| c.is_ascii_lowercase());
+        let has_special = value.chars().any(|c| !c.is_alphanumeric());
+
+        // Strong signal: mixed case + digits + special chars
+        // Or: long enough to be suspicious
+        (has_digit && has_upper && has_lower)
+            || (has_special && value.len() >= 8)
+            || value.len() >= 16
+    }
+
+    /// Check if a line is a false positive context (object properties, configs, etc.)
+    fn is_false_positive_context(line: &str) -> bool {
+        let lower = line.to_lowercase();
+
+        // Skip lines that are clearly not secrets
+        // Object/struct property definitions
+        if lower.contains("accessorkey")
+            || lower.contains("storagekey")
+            || lower.contains("cachekey")
+            || lower.contains("localstoragekey")
+            || lower.contains("sessionkey")
+            || lower.contains("sortkey")
+            || lower.contains("primarykey")
+            || lower.contains("foreignkey")
+            || lower.contains("uniquekey")
+            || lower.contains("indexkey")
+        {
+            return true;
+        }
+
+        // HTTP headers and common config keys
+        if lower.contains("cache-control")
+            || lower.contains("content-type")
+            || lower.contains("accept")
+            || lower.contains("authorization: bearer")  // the header name, not value
+            || lower.contains("x-api-key")
+        // header name
+        {
+            return true;
+        }
+
+        // React/Vue/Angular component props and table columns
+        if lower.contains("accessor:")
+            || lower.contains("header:")
+            || lower.contains("field:")
+            || lower.contains("dataindex:")
+        {
+            return true;
+        }
+
+        // Translation keys, i18n
+        if lower.contains("t('") || lower.contains("i18n") || lower.contains("translate") {
+            return true;
+        }
+
+        // Type definitions and interfaces (TypeScript)
+        if lower.contains(": string") || lower.contains(": number") || lower.contains("interface ")
+        {
+            return true;
+        }
+
+        false
+    }
+}
 
 impl Rule for HardcodedSecretRule {
     fn id(&self) -> &str {
@@ -238,7 +573,12 @@ impl Rule for HardcodedSecretRule {
                 continue;
             }
 
-            // Check for API keys and secrets with assignment
+            // Skip false positive contexts
+            if Self::is_false_positive_context(line) {
+                continue;
+            }
+
+            // HIGH CONFIDENCE: Specific secret patterns (api_key, secret_key, auth_token, etc.)
             if SECRET_PATTERN.is_match(line) {
                 findings.push(create_finding_at_line(
                     self.id(),
@@ -249,10 +589,10 @@ impl Rule for HardcodedSecretRule {
                     "Hardcoded secret detected - use environment variables or a secrets manager",
                     parsed.language,
                 ));
-                continue; // Don't report same line multiple times
+                continue;
             }
 
-            // Check for AWS access keys
+            // HIGH CONFIDENCE: AWS access keys (distinctive AKIA prefix)
             if AWS_KEY_PATTERN.is_match(line) {
                 findings.push(create_finding_at_line(
                     self.id(),
@@ -266,7 +606,7 @@ impl Rule for HardcodedSecretRule {
                 continue;
             }
 
-            // Check for AWS secret keys
+            // HIGH CONFIDENCE: AWS secret access keys
             if AWS_SECRET_PATTERN.is_match(line) {
                 findings.push(create_finding_at_line(
                     self.id(),
@@ -280,7 +620,7 @@ impl Rule for HardcodedSecretRule {
                 continue;
             }
 
-            // Check for GitHub tokens
+            // HIGH CONFIDENCE: GitHub tokens (distinctive ghp_/ghs_ prefix)
             if GITHUB_TOKEN_PATTERN.is_match(line) {
                 findings.push(create_finding_at_line(
                     self.id(),
@@ -294,7 +634,7 @@ impl Rule for HardcodedSecretRule {
                 continue;
             }
 
-            // Check for private keys
+            // HIGH CONFIDENCE: PEM-encoded private keys
             if PRIVATE_KEY_PATTERN.is_match(line) {
                 findings.push(create_finding_at_line(
                     self.id(),
@@ -308,20 +648,22 @@ impl Rule for HardcodedSecretRule {
                 continue;
             }
 
-            // Generic secret pattern (less specific, more false positives)
-            if GENERIC_SECRET_PATTERN.is_match(line)
-                && !line.contains("test")
-                && !line.contains("example")
+            // MEDIUM CONFIDENCE: Password assignments with real-looking values
+            if let Some(caps) = PASSWORD_ASSIGNMENT_PATTERN.captures(line)
+                && let Some(value_match) = caps.get(2)
             {
-                findings.push(create_finding_at_line(
-                    self.id(),
-                    &parsed.path,
-                    line_num + 1,
-                    trimmed,
-                    Severity::Warning,
-                    "Potential hardcoded credential - verify this is not a real secret",
-                    parsed.language,
-                ));
+                let value = value_match.as_str();
+                if Self::is_real_password(value) {
+                    findings.push(create_finding_at_line(
+                        self.id(),
+                        &parsed.path,
+                        line_num + 1,
+                        "[REDACTED PASSWORD]",
+                        Severity::Critical,
+                        "Hardcoded password detected - use environment variables or a secrets manager",
+                        parsed.language,
+                    ));
+                }
             }
         }
         findings

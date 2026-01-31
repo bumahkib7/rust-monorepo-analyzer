@@ -62,6 +62,7 @@ docker run -v $(pwd):/workspace ghcr.io/bumahkib7/rma scan /workspace
 - **Watch Mode**: Real-time analysis on file changes
 - **HTTP API**: Daemon mode for IDE integration
 - **WASM Plugins**: Extend with custom analysis rules
+- **External Providers**: Optional integration with PMD for enhanced Java analysis
 - **Shell Completions**: Bash, Zsh, Fish, PowerShell, Elvish
 
 ## Quick Start
@@ -115,6 +116,7 @@ Options:
   -i, --incremental         Enable incremental mode (only scan changed files)
   -j, --parallelism <N>     Number of parallel workers (0 = auto-detect)
   -l, --languages <LANGS>   Languages to scan (comma-separated)
+      --providers <LIST>    Analysis providers (rma,pmd,oxlint) [default: rma]
       --ai                  Enable AI-powered vulnerability analysis
       --no-progress         Disable progress bars
   -v, --verbose             Increase verbosity (-v, -vv, -vvv)
@@ -175,6 +177,7 @@ critical[RMA-S005]: SQL query built with format! - use parameterized queries ins
 | RMA-S001-S999 | Security issues (unsafe, XSS, injection, etc.) |
 | RMA-Q001-Q999 | Quality issues (complexity, length, style) |
 | RMA-T001-T999 | Style issues (TODO, console.log, etc.) |
+| RMA-J001-J999 | Java external tool findings (PMD) |
 
 ### GitHub Actions Integration
 
@@ -361,6 +364,37 @@ rma plugin test my-plugin --file src/main.rs
 rma plugin remove my-plugin
 ```
 
+## External Providers
+
+RMA supports optional integration with external static analysis tools for enhanced language-specific coverage.
+
+### PMD for Java
+
+[PMD](https://pmd.github.io/) provides comprehensive Java static analysis with hundreds of rules for security, best practices, and code style.
+
+**Enable PMD:**
+```bash
+# Use PMD alongside RMA's native rules
+rma scan . --providers rma,pmd
+
+# Configure PMD in rma.toml (see Configuration section)
+```
+
+**Requirements:**
+- PMD 6.x or 7.x installed and available in PATH
+- Or specify custom path in `rma.toml`
+
+**PMD Rulesets:**
+RMA uses PMD's security, error-prone, and best practices rulesets by default. You can customize which rulesets to use in the configuration.
+
+### Available Providers
+
+| Provider | Languages | Description |
+|----------|-----------|-------------|
+| `rma` | All | Built-in Rust-native rules (always enabled) |
+| `pmd` | Java | PMD static analysis for Java |
+| `oxlint` | JS/TS | Oxlint for JavaScript/TypeScript |
+
 ## Configuration
 
 Initialize configuration:
@@ -401,6 +435,16 @@ unsafe_rust_paths = ["src/ffi/**"]
 [baseline]
 file = ".rma/baseline.json"
 mode = "all"  # or "new-only"
+
+# Optional: External providers configuration
+# [providers]
+# enabled = ["rma", "pmd"]  # Providers to use
+#
+# [providers.pmd]
+# pmd_path = "/usr/local/bin/pmd"  # Path to PMD installation
+# rulesets = ["category/java/security.xml", "category/java/bestpractices.xml"]
+# timeout_ms = 120000  # 2 minute timeout
+# min_priority = 3  # 1-5, lower is more severe
 ```
 
 ### Inline Suppression

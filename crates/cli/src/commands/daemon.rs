@@ -26,6 +26,40 @@ pub fn run(args: DaemonArgs) -> Result<()> {
     }
 
     println!();
+    println!("{}", "📡 Endpoints:".cyan());
+    println!(
+        "  {} http://{}:{}/health",
+        "Health:".dimmed(),
+        args.host,
+        args.port
+    );
+    println!(
+        "  {} http://{}:{}/api/v1/",
+        "REST API:".dimmed(),
+        args.host,
+        args.port
+    );
+    println!(
+        "  {} ws://{}:{}/ws/watch",
+        "WebSocket:".dimmed(),
+        args.host,
+        args.port
+    );
+    println!();
+    println!("{}", "🌐 Web Dashboard:".cyan());
+    println!(
+        "  {} {}",
+        "Open:".dimmed(),
+        "editors/web-dashboard/index.html".bright_white()
+    );
+    println!(
+        "  {} file://{}/editors/web-dashboard/index.html",
+        "Or:".dimmed(),
+        std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    );
+    println!();
 
     // Use tokio runtime to start the daemon
     let rt = tokio::runtime::Runtime::new()?;

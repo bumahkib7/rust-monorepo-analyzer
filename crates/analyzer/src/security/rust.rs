@@ -103,9 +103,43 @@ impl Rule for TransmuteRule {
     }
 }
 
-/// Detects `Command::new` with shell execution - command injection sink
-/// Confidence: HIGH (precise AST pattern)
+/// Detects actual command injection patterns - shell mode with dynamic arguments
+///
+/// Only flags as CRITICAL when BOTH conditions are met:
+/// 1. Shell invocation with -c, /C, or -Command mode
+/// 2. Dynamic argument composition (format!, variables, concat)
+///
+/// Plain `Command::new("cmd")` without shell mode is NOT injection.
+/// Confidence: HIGH (requires evidence of injection pattern)
 pub struct CommandInjectionRule;
+
+impl CommandInjectionRule {
+    /// Check if a method chain on Command has shell mode AND dynamic args
+    fn has_injection_pattern(content: &str, start_byte: usize, end_byte: usize) -> bool {
+        // Get surrounding context (the full statement)
+        let search_end = (end_byte + 500).min(content.len());
+        let context = &content[start_byte..search_end];
+
+        // Must have shell execution mode
+        let has_shell_mode = context.contains("\"-c\"")
+            || context.contains("\"/C\"")
+            || context.contains("\"-Command\"")
+            || context.contains("[\"-c\",")
+            || context.contains("[\"/C\",");
+
+        // Must have dynamic argument composition
+        let has_dynamic_args = context.contains("format!(")
+            || context.contains("&format!(")
+            || context.contains(".arg(user")
+            || context.contains(".arg(input")
+            || context.contains(".arg(cmd")
+            || context.contains(".arg(query")
+            || context.contains(".args(&")
+            || context.contains(".args(vec![");
+
+        has_shell_mode && has_dynamic_args
+    }
+}
 
 impl Rule for CommandInjectionRule {
     fn id(&self) -> &str {
@@ -113,7 +147,7 @@ impl Rule for CommandInjectionRule {
     }
 
     fn description(&self) -> &str {
-        "Detects shell command execution sinks"
+        "Detects command injection patterns (shell mode with dynamic arguments)"
     }
 
     fn applies_to(&self, lang: Language) -> bool {
@@ -125,33 +159,101 @@ impl Rule for CommandInjectionRule {
         let mut cursor = parsed.tree.walk();
 
         find_nodes_by_kind(&mut cursor, "call_expression", |node: Node| {
-            if let Some(func) = node.child(0) {
+            if let Some(func) = node.child(0)
+                && let Some(args) = node.child_by_field_name("arguments")
+            {
                 let func_text = func.utf8_text(parsed.content.as_bytes()).unwrap_or("");
 
-                // HIGH: Command::new with shell
+                // Look for Command::new with shell program
                 if func_text.ends_with("Command::new") || func_text == "Command::new" {
-                    // Check arguments for shell invocation
-                    if let Some(args) = node.child_by_field_name("arguments") {
-                        let args_text = args.utf8_text(parsed.content.as_bytes()).unwrap_or("");
+                    let args_text = args.utf8_text(parsed.content.as_bytes()).unwrap_or("");
 
-                        if args_text.contains("\"sh\"")
-                            || args_text.contains("\"bash\"")
-                            || args_text.contains("\"/bin/sh\"")
-                            || args_text.contains("\"/bin/bash\"")
-                            || args_text.contains("\"cmd\"")
-                            || args_text.contains("\"powershell\"")
-                        {
-                            findings.push(create_finding_with_confidence(
-                                self.id(),
-                                &node,
-                                &parsed.path,
-                                &parsed.content,
-                                Severity::Critical,
-                                "Shell command execution - validate all inputs to prevent injection",
-                                Language::Rust,
-                                Confidence::High,
-                            ));
-                        }
+                    // Check if calling a shell
+                    let is_shell = args_text.contains("\"sh\"")
+                        || args_text.contains("\"bash\"")
+                        || args_text.contains("\"/bin/sh\"")
+                        || args_text.contains("\"/bin/bash\"")
+                        || args_text.contains("\"cmd\"")
+                        || args_text.contains("\"powershell\"")
+                        || args_text.contains("\"cmd.exe\"")
+                        || args_text.contains("\"powershell.exe\"");
+
+                    if is_shell
+                        && Self::has_injection_pattern(
+                            &parsed.content,
+                            node.start_byte(),
+                            node.end_byte(),
+                        )
+                    {
+                        findings.push(create_finding_with_confidence(
+                            self.id(),
+                            &node,
+                            &parsed.path,
+                            &parsed.content,
+                            Severity::Critical,
+                            "Command injection: shell mode with dynamic arguments - validate and sanitize input",
+                            Language::Rust,
+                            Confidence::High,
+                        ));
+                    }
+                    // No else - plain shell spawn without dynamic args is NOT injection
+                }
+            }
+        });
+        findings
+    }
+}
+
+/// Detects shell process spawning (informational - for security policy)
+///
+/// This is NOT command injection - just awareness that a shell is being spawned.
+/// Severity: INFO (policy awareness, not a vulnerability)
+pub struct ShellSpawnRule;
+
+impl Rule for ShellSpawnRule {
+    fn id(&self) -> &str {
+        "rust/shell-spawn"
+    }
+
+    fn description(&self) -> &str {
+        "Detects shell process spawning (for security policy awareness)"
+    }
+
+    fn applies_to(&self, lang: Language) -> bool {
+        lang == Language::Rust
+    }
+
+    fn check(&self, parsed: &ParsedFile) -> Vec<Finding> {
+        let mut findings = Vec::new();
+        let mut cursor = parsed.tree.walk();
+
+        find_nodes_by_kind(&mut cursor, "call_expression", |node: Node| {
+            if let Some(func) = node.child(0)
+                && let Some(args) = node.child_by_field_name("arguments")
+            {
+                let func_text = func.utf8_text(parsed.content.as_bytes()).unwrap_or("");
+
+                if func_text.ends_with("Command::new") || func_text == "Command::new" {
+                    let args_text = args.utf8_text(parsed.content.as_bytes()).unwrap_or("");
+
+                    let is_shell = args_text.contains("\"sh\"")
+                        || args_text.contains("\"bash\"")
+                        || args_text.contains("\"/bin/sh\"")
+                        || args_text.contains("\"/bin/bash\"")
+                        || args_text.contains("\"cmd\"")
+                        || args_text.contains("\"powershell\"");
+
+                    if is_shell {
+                        findings.push(create_finding_with_confidence(
+                            self.id(),
+                            &node,
+                            &parsed.path,
+                            &parsed.content,
+                            Severity::Info,
+                            "Shell process spawn - ensure arguments are controlled and expected",
+                            Language::Rust,
+                            Confidence::High,
+                        ));
                     }
                 }
             }
@@ -560,15 +662,16 @@ fn danger() {
     }
 
     #[test]
-    fn test_command_shell_detection() {
+    fn test_command_injection_with_dynamic_args() {
         let config = RmaConfig::default();
         let parser = ParserEngine::new(config);
 
+        // This IS command injection: shell mode + dynamic args
         let content = r#"
 use std::process::Command;
 
-fn run_shell(cmd: &str) {
-    Command::new("sh").arg("-c").arg(cmd).output().unwrap();
+fn run_shell(user_cmd: &str) {
+    Command::new("sh").arg("-c").arg(format!("echo {}", user_cmd)).output().unwrap();
 }
 "#;
 
@@ -576,7 +679,36 @@ fn run_shell(cmd: &str) {
         let rule = CommandInjectionRule;
         let findings = rule.check(&parsed);
 
-        assert!(!findings.is_empty());
+        assert!(!findings.is_empty(), "Should detect injection pattern");
         assert_eq!(findings[0].confidence, Confidence::High);
+        assert_eq!(findings[0].severity, Severity::Critical);
+    }
+
+    #[test]
+    fn test_shell_spawn_without_injection() {
+        let config = RmaConfig::default();
+        let parser = ParserEngine::new(config);
+
+        // This is NOT injection - just shell spawn with static args
+        let content = r#"
+use std::process::Command;
+
+fn get_env() {
+    Command::new("cmd").creation_flags(123).output().unwrap();
+}
+"#;
+
+        let parsed = parser.parse_file(Path::new("test.rs"), content).unwrap();
+        let injection_rule = CommandInjectionRule;
+        let findings = injection_rule.check(&parsed);
+
+        // Should NOT flag as injection (no -c mode, no dynamic args)
+        assert!(findings.is_empty(), "Plain shell spawn is not injection");
+
+        // But ShellSpawnRule should flag it as INFO
+        let spawn_rule = ShellSpawnRule;
+        let spawn_findings = spawn_rule.check(&parsed);
+        assert!(!spawn_findings.is_empty(), "Should detect shell spawn");
+        assert_eq!(spawn_findings[0].severity, Severity::Info);
     }
 }
