@@ -19,6 +19,7 @@ pub struct ScanArgs {
     pub output: Option<PathBuf>,
     pub severity: Severity,
     pub profile: Option<String>,
+    pub ruleset: Option<String>,
     pub incremental: bool,
     pub jobs: usize,
     pub languages: Option<Vec<String>>,
@@ -29,6 +30,7 @@ pub struct ScanArgs {
     pub config_path: Option<PathBuf>,
     pub quiet: bool,
     pub baseline_mode: bool,
+    pub include_suppressed: bool,
 }
 
 pub fn run(args: ScanArgs) -> Result<()> {
@@ -155,6 +157,14 @@ fn print_scan_header(args: &ScanArgs, toml_config: Option<&RmaTomlConfig>, profi
             "  {} {}",
             "Languages:".dimmed(),
             langs.join(", ").bright_white()
+        );
+    }
+
+    if let Some(ref ruleset) = args.ruleset {
+        println!(
+            "  {} {}",
+            "Ruleset:".dimmed(),
+            ruleset.cyan()
         );
     }
 

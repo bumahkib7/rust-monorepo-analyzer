@@ -1,10 +1,10 @@
 //! Config command implementation
 
 use crate::ui::theme::Theme;
-use crate::ConfigAction;
+use crate::{ConfigAction, EffectiveConfigFormat};
 use anyhow::Result;
 use colored::Colorize;
-use rma_common::{RmaTomlConfig, WarningLevel};
+use rma_common::{EffectiveConfig, RmaTomlConfig, WarningLevel};
 
 pub fn run(action: ConfigAction) -> Result<()> {
     match action {
@@ -15,7 +15,38 @@ pub fn run(action: ConfigAction) -> Result<()> {
         ConfigAction::Path => show_config_path(),
         ConfigAction::Reset { force } => reset_config(force),
         ConfigAction::Validate => validate_config(),
+        ConfigAction::PrintEffective { format } => print_effective(format),
     }
+}
+
+fn print_effective(format: EffectiveConfigFormat) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+
+    // Discover config (if any)
+    let (config_path, toml_config) = match RmaTomlConfig::discover(&cwd) {
+        Some((path, cfg)) => (Some(path), Some(cfg)),
+        None => (None, None),
+    };
+
+    // Build effective config (no CLI overrides in this context - just config + defaults)
+    let effective = EffectiveConfig::resolve(
+        toml_config.as_ref(),
+        config_path.as_deref(),
+        None,  // No CLI profile override
+        false, // No CLI baseline-mode override
+    );
+
+    match format {
+        EffectiveConfigFormat::Text => {
+            println!();
+            println!("{}", effective.to_text());
+        }
+        EffectiveConfigFormat::Json => {
+            println!("{}", effective.to_json()?);
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_config() -> Result<()> {

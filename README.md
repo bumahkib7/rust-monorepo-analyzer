@@ -2,7 +2,10 @@
 
 [![CI](https://github.com/bumahkib7/rust-monorepo-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/bumahkib7/rust-monorepo-analyzer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/bumahkib7/rust-monorepo-analyzer)](https://github.com/bumahkib7/rust-monorepo-analyzer/releases)
-[![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![crates.io](https://img.shields.io/crates/v/rma-cli.svg)](https://crates.io/crates/rma-cli)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fbumahkib7%2Frma-blue)](https://ghcr.io/bumahkib7/rma)
+[![Homebrew](https://img.shields.io/badge/homebrew-bumahkib7%2Ftap%2Frma-orange)](https://github.com/bumahkib7/homebrew-tap)
+[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
 **Ultra-fast Rust-native code intelligence and security analysis platform for large enterprise monorepos.**
@@ -11,7 +14,18 @@ RMA leverages tree-sitter for polyglot parsing, rayon for parallelism, and tanti
 
 ## Quick Install
 
-**Linux/macOS (one command):**
+**Homebrew (macOS/Linux):**
+```bash
+brew tap bumahkib7/tap
+brew install rma
+```
+
+**Cargo:**
+```bash
+cargo install rma-cli
+```
+
+**Shell Script (Linux/macOS):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bumahkib7/rust-monorepo-analyzer/master/install.sh | bash
 ```
@@ -21,14 +35,17 @@ curl -fsSL https://raw.githubusercontent.com/bumahkib7/rust-monorepo-analyzer/ma
 iwr -useb https://raw.githubusercontent.com/bumahkib7/rust-monorepo-analyzer/master/install.ps1 | iex
 ```
 
-**Cargo:**
-```bash
-cargo install rma-cli
-```
-
 **Docker:**
 ```bash
-docker run -v $(pwd):/workspace ghcr.io/bumahkib7/rust-monorepo-analyzer scan /workspace
+docker run -v $(pwd):/workspace ghcr.io/bumahkib7/rma scan /workspace
+```
+
+**GitHub Actions:**
+```yaml
+- uses: bumahkib7/rust-monorepo-analyzer/.github/actions/rma-scan@master
+  with:
+    path: '.'
+    upload-sarif: true
 ```
 
 ## Features
@@ -316,27 +333,56 @@ Initialize configuration:
 rma init
 ```
 
-This creates `.rma/config.json`:
+This creates `rma.toml`:
 
-```json
-{
-  "exclude_patterns": [
-    "**/node_modules/**",
-    "**/target/**",
-    "**/vendor/**",
-    "**/.git/**"
-  ],
-  "languages": [],
-  "min_severity": "warning",
-  "max_file_size": 10485760,
-  "parallelism": 0,
-  "incremental": true,
-  "ai": {
-    "enabled": false,
-    "provider": "openai",
-    "model": "gpt-4"
-  }
-}
+```toml
+# Config format version (required)
+config_version = 1
+
+[scan]
+include = ["src/**", "lib/**"]
+exclude = ["node_modules/**", "target/**", "dist/**"]
+max_file_size = 10485760
+
+[rules]
+enable = ["*"]
+disable = ["js/console-log"]
+
+[rulesets]
+security = ["js/xss-sink", "js/timer-string-eval", "rust/unsafe-block"]
+maintainability = ["generic/long-function", "generic/high-complexity"]
+
+[profiles]
+default = "balanced"
+
+[profiles.strict]
+max_function_lines = 50
+max_complexity = 10
+
+[allow]
+unsafe_rust_paths = ["src/ffi/**"]
+
+[baseline]
+file = ".rma/baseline.json"
+mode = "all"  # or "new-only"
+```
+
+### Inline Suppression
+
+Suppress specific findings with comments:
+
+```javascript
+// rma-ignore-next-line js/xss-sink reason="content is sanitized"
+element.textContent = processedContent;
+
+// rma-ignore generic/long-function reason="complex algorithm"
+function processData() { /* ... */ }
+```
+
+```python
+# rma-ignore-next-line python/hardcoded-secret reason="test fixture"
+TEST_API_KEY = "test-key-12345"
+```
 ```
 
 ### Environment Variables

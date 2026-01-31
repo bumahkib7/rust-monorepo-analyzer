@@ -39,6 +39,18 @@ inputs:
     description: 'Enable incremental scanning (only changed files)'
     required: false
     default: 'false'
+  profile:
+    description: 'Analysis profile: fast, balanced, strict'
+    required: false
+    default: 'balanced'
+  ruleset:
+    description: 'Ruleset to use: security, maintainability, or custom name'
+    required: false
+    default: ''
+  baseline-mode:
+    description: 'Only report new findings not in baseline'
+    required: false
+    default: 'false'
   extra-args:
     description: 'Additional arguments to pass to rma scan'
     required: false
@@ -165,6 +177,18 @@ runs:
 
         if [ "${{ inputs.incremental }}" = "true" ]; then
           CMD="$CMD --incremental"
+        fi
+
+        if [ "${{ inputs.profile }}" != "" ]; then
+          CMD="$CMD --profile ${{ inputs.profile }}"
+        fi
+
+        if [ "${{ inputs.ruleset }}" != "" ]; then
+          CMD="$CMD --ruleset ${{ inputs.ruleset }}"
+        fi
+
+        if [ "${{ inputs.baseline-mode }}" = "true" ]; then
+          CMD="$CMD --baseline-mode"
         fi
 
         if [ "${{ inputs.extra-args }}" != "" ]; then

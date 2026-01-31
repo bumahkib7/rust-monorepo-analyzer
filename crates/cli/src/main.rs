@@ -78,6 +78,10 @@ pub enum Commands {
         #[arg(short = 'p', long)]
         profile: Option<String>,
 
+        /// Ruleset to use (security, maintainability, or custom)
+        #[arg(long)]
+        ruleset: Option<String>,
+
         /// Enable incremental mode (only scan changed files)
         #[arg(short, long)]
         incremental: bool,
@@ -109,6 +113,10 @@ pub enum Commands {
         /// Only report new findings (requires baseline)
         #[arg(long)]
         baseline_mode: bool,
+
+        /// Include suppressed findings in output (normally hidden)
+        #[arg(long)]
+        include_suppressed: bool,
     },
 
     /// Watch for file changes and re-analyze in real-time
@@ -305,12 +313,26 @@ pub enum ConfigAction {
     Path,
     /// Validate configuration file
     Validate,
+    /// Print the effective (resolved) configuration
+    PrintEffective {
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text", value_enum)]
+        format: EffectiveConfigFormat,
+    },
     /// Reset to defaults
     Reset {
         /// Don't ask for confirmation
         #[arg(short, long)]
         force: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq)]
+pub enum EffectiveConfigFormat {
+    /// Human-readable text
+    Text,
+    /// JSON format
+    Json,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq)]
@@ -385,6 +407,7 @@ fn main() -> Result<()> {
             output,
             severity,
             profile,
+            ruleset,
             incremental,
             jobs,
             languages,
@@ -393,12 +416,14 @@ fn main() -> Result<()> {
             timing,
             exclude,
             baseline_mode,
+            include_suppressed,
         } => commands::scan::run(commands::scan::ScanArgs {
             path,
             format,
             output,
             severity: severity.into(),
             profile,
+            ruleset,
             incremental,
             jobs,
             languages,
@@ -409,6 +434,7 @@ fn main() -> Result<()> {
             config_path,
             quiet: cli.quiet,
             baseline_mode,
+            include_suppressed,
         }),
 
         Commands::Watch {
