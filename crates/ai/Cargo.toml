@@ -6,8 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-rma-common = { path = "../common" }
-rma-parser = { path = "../parser" }
+rma-common = { version = "0.1.0", path = "../common" }
+rma-parser = { version = "0.1.0", path = "../parser" }
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
