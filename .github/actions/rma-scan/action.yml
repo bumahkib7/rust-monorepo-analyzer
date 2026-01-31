@@ -146,8 +146,8 @@ runs:
       run: |
         # Build command
         CMD="rma scan ${{ inputs.path }}"
-        CMD="$CMD --output ${{ inputs.format }}"
-        CMD="$CMD -f ${{ inputs.output-file }}"
+        CMD="$CMD --format ${{ inputs.format }}"
+        CMD="$CMD --output ${{ inputs.output-file }}"
         CMD="$CMD --severity ${{ inputs.severity }}"
 
         # Optional flags
