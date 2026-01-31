@@ -5,8 +5,8 @@ pub mod state;
 
 use anyhow::Result;
 use axum::{
-    routing::{get, post},
     Router,
+    routing::{get, post},
 };
 use rma_common::RmaConfig;
 use std::net::SocketAddr;

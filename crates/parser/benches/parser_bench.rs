@@ -1,6 +1,6 @@
 //! Parser benchmarks
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rma_common::RmaConfig;
 use rma_parser::ParserEngine;
 use std::path::Path;

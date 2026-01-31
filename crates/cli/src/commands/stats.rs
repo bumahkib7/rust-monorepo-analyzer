@@ -1,8 +1,8 @@
 //! Stats command implementation
 
+use crate::OutputFormat;
 use crate::output::tables;
 use crate::ui::theme::Theme;
-use crate::OutputFormat;
 use anyhow::Result;
 use colored::Colorize;
 use comfy_table::{Cell, Color};

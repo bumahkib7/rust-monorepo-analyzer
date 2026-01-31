@@ -60,20 +60,14 @@ fn validate_config() -> Result<()> {
     let (config_path, config) = match RmaTomlConfig::discover(&cwd) {
         Some((path, cfg)) => (path, cfg),
         None => {
-            println!(
-                "{} No configuration file found",
-                Theme::warning_mark()
-            );
+            println!("{} No configuration file found", Theme::warning_mark());
             println!();
             println!("  Looking for:");
             println!("    {} rma.toml", Theme::bullet());
             println!("    {} .rma/rma.toml", Theme::bullet());
             println!("    {} .rma.toml", Theme::bullet());
             println!();
-            println!(
-                "  Run {} to create one",
-                "rma init".yellow()
-            );
+            println!("  Run {} to create one", "rma init".yellow());
             return Ok(());
         }
     };
@@ -89,10 +83,7 @@ fn validate_config() -> Result<()> {
     let warnings = config.validate();
 
     if warnings.is_empty() {
-        println!(
-            "{} Configuration is valid!",
-            Theme::success_mark()
-        );
+        println!("{} Configuration is valid!", Theme::success_mark());
         println!();
 
         // Show summary
@@ -134,8 +125,14 @@ fn validate_config() -> Result<()> {
             config.baseline.mode
         );
     } else {
-        let errors: Vec<_> = warnings.iter().filter(|w| w.level == WarningLevel::Error).collect();
-        let warns: Vec<_> = warnings.iter().filter(|w| w.level == WarningLevel::Warning).collect();
+        let errors: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.level == WarningLevel::Error)
+            .collect();
+        let warns: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.level == WarningLevel::Warning)
+            .collect();
 
         if !errors.is_empty() {
             println!("{} Configuration has errors:", Theme::error_mark());
@@ -241,11 +238,7 @@ fn list_config() -> Result<()> {
     print_config_tree(&json, "");
 
     println!();
-    println!(
-        "  {} {}",
-        "Config file:".dimmed(),
-        config_path.display()
-    );
+    println!("  {} {}", "Config file:".dimmed(), config_path.display());
     println!();
 
     Ok(())
@@ -316,7 +309,10 @@ fn edit_config() -> Result<()> {
                 if warnings.is_empty() {
                     println!("{} Configuration saved and valid", Theme::success_mark());
                 } else {
-                    println!("{} Configuration saved with warnings:", Theme::warning_mark());
+                    println!(
+                        "{} Configuration saved with warnings:",
+                        Theme::warning_mark()
+                    );
                     for w in &warnings {
                         println!("  {} {}", Theme::bullet(), w.message.yellow());
                     }

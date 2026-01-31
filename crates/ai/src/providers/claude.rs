@@ -1,6 +1,6 @@
 //! Claude AI Provider (Anthropic)
 
-use crate::{prompts, AiAnalyzer, AiError, AnalysisRequest, AnalysisResponse};
+use crate::{AiAnalyzer, AiError, AnalysisRequest, AnalysisResponse, prompts};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

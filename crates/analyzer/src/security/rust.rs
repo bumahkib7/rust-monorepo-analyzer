@@ -1,6 +1,6 @@
 //! Rust-specific security vulnerability DETECTION rules
 
-use crate::rules::{create_finding, Rule};
+use crate::rules::{Rule, create_finding};
 use rma_common::{Finding, Language, Severity};
 use rma_parser::ParsedFile;
 use tree_sitter::Node;
@@ -186,7 +186,9 @@ impl Rule for RawPointerDerefRule {
         find_nodes_by_kind(&mut cursor, "unary_expression", |node: Node| {
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes()) {
                 // Check for *ptr patterns with raw pointer types
-                if text.starts_with('*') && (text.contains("*const") || text.contains("*mut") || text.contains("as *")) {
+                if text.starts_with('*')
+                    && (text.contains("*const") || text.contains("*mut") || text.contains("as *"))
+                {
                     findings.push(create_finding(
                         self.id(),
                         &node,
@@ -231,7 +233,10 @@ impl Rule for CommandInjectionRule {
                 }
                 // Detect Command::new with shell or sh
                 if (text.contains("Command::new") || text.contains("process::Command"))
-                    && (text.contains("\"sh\"") || text.contains("\"bash\"") || text.contains("\"/bin/sh\"") || text.contains("shell"))
+                    && (text.contains("\"sh\"")
+                        || text.contains("\"bash\"")
+                        || text.contains("\"/bin/sh\"")
+                        || text.contains("shell"))
                 {
                     findings.push(create_finding(
                         self.id(),
@@ -244,7 +249,8 @@ impl Rule for CommandInjectionRule {
                     ));
                 }
                 // Detect .arg() with format! or variable interpolation
-                if text.contains(".arg(") && (text.contains("format!") || text.contains("&format")) {
+                if text.contains(".arg(") && (text.contains("format!") || text.contains("&format"))
+                {
                     findings.push(create_finding(
                         self.id(),
                         &node,
@@ -286,9 +292,12 @@ impl Rule for SqlInjectionRule {
                 // Check for format! with SQL keywords
                 if text.contains("format!") {
                     let lower = text.to_lowercase();
-                    if lower.contains("select") || lower.contains("insert")
-                        || lower.contains("update") || lower.contains("delete")
-                        || lower.contains("drop") || lower.contains("exec")
+                    if lower.contains("select")
+                        || lower.contains("insert")
+                        || lower.contains("update")
+                        || lower.contains("delete")
+                        || lower.contains("drop")
+                        || lower.contains("exec")
                     {
                         findings.push(create_finding(
                             self.id(),
@@ -309,7 +318,9 @@ impl Rule for SqlInjectionRule {
         find_nodes_by_kind(&mut cursor2, "binary_expression", |node: Node| {
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes()) {
                 let lower = text.to_lowercase();
-                if (lower.contains("select ") || lower.contains("insert ") || lower.contains("update "))
+                if (lower.contains("select ")
+                    || lower.contains("insert ")
+                    || lower.contains("update "))
                     && text.contains('+')
                 {
                     findings.push(create_finding(
@@ -397,8 +408,10 @@ impl Rule for PathTraversalRule {
         find_nodes_by_kind(&mut cursor, "call_expression", |node: Node| {
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes()) {
                 // Check for File::open, fs::read, etc. with format! or user input
-                if (text.contains("File::open") || text.contains("fs::read")
-                    || text.contains("fs::write") || text.contains("Path::new"))
+                if (text.contains("File::open")
+                    || text.contains("fs::read")
+                    || text.contains("fs::write")
+                    || text.contains("Path::new"))
                     && (text.contains("format!") || text.contains("&format"))
                 {
                     findings.push(create_finding(

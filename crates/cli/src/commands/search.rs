@@ -1,7 +1,7 @@
 //! Search command implementation
 
-use crate::ui::theme::Theme;
 use crate::OutputFormat;
+use crate::ui::theme::Theme;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use rma_common::Severity;

@@ -2,10 +2,10 @@
 
 use super::SearchResult;
 use anyhow::Result;
+use tantivy::Index;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::{Schema, Value};
-use tantivy::Index;
 
 /// Execute a search query
 pub fn execute_search(

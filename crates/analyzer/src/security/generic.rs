@@ -2,7 +2,7 @@
 //!
 //! These rules apply across multiple languages for static analysis.
 
-use crate::rules::{create_finding, create_finding_at_line, Rule};
+use crate::rules::{Rule, create_finding, create_finding_at_line};
 use regex::Regex;
 use rma_common::{Finding, Language, Severity};
 use rma_parser::ParsedFile;
@@ -14,24 +14,25 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)(api[_-]?key|secret[_-]?key|password|passwd|token|auth[_-]?token|private[_-]?key|access[_-]?key|client[_-]?secret)\s*[:=]\s*["'][^"']{8,}["']"#).unwrap()
 });
 
-static AWS_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"AKIA[0-9A-Z]{16}"#).unwrap()
-});
+static AWS_KEY_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"AKIA[0-9A-Z]{16}"#).unwrap());
 
 static AWS_SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*["'][A-Za-z0-9/+=]{40}["']"#).unwrap()
+    Regex::new(r#"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*["'][A-Za-z0-9/+=]{40}["']"#)
+        .unwrap()
 });
 
-static GITHUB_TOKEN_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"gh[ps]_[A-Za-z0-9]{36,}"#).unwrap()
-});
+static GITHUB_TOKEN_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"gh[ps]_[A-Za-z0-9]{36,}"#).unwrap());
 
-static PRIVATE_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"#).unwrap()
-});
+static PRIVATE_KEY_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"#).unwrap());
 
 static GENERIC_SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)(secret|password|passwd|pwd|token|key|credential|auth)\s*[:=]\s*["'][^"']{12,}["']"#).unwrap()
+    Regex::new(
+        r#"(?i)(secret|password|passwd|pwd|token|key|credential|auth)\s*[:=]\s*["'][^"']{12,}["']"#,
+    )
+    .unwrap()
 });
 
 /// DETECTS TODO/FIXME comments that may indicate incomplete code
@@ -303,7 +304,10 @@ impl Rule for HardcodedSecretRule {
             }
 
             // Generic secret pattern (less specific, more false positives)
-            if GENERIC_SECRET_PATTERN.is_match(line) && !line.contains("test") && !line.contains("example") {
+            if GENERIC_SECRET_PATTERN.is_match(line)
+                && !line.contains("test")
+                && !line.contains("example")
+            {
                 findings.push(create_finding_at_line(
                     self.id(),
                     &parsed.path,
@@ -342,12 +346,21 @@ impl Rule for InsecureCryptoRule {
             let lower = line.to_lowercase();
 
             // Skip detection code (lines that are checking for patterns)
-            if lower.contains(".contains(") || lower.contains(".is_match(") || lower.contains("regex") {
+            if lower.contains(".contains(")
+                || lower.contains(".is_match(")
+                || lower.contains("regex")
+            {
                 continue;
             }
 
             // MD5 - broken for security use
-            if lower.contains("md5") && (lower.contains("hash") || lower.contains("digest") || lower.contains("::") || lower.contains("import") || lower.contains("require")) {
+            if lower.contains("md5")
+                && (lower.contains("hash")
+                    || lower.contains("digest")
+                    || lower.contains("::")
+                    || lower.contains("import")
+                    || lower.contains("require"))
+            {
                 findings.push(create_finding_at_line(
                     self.id(),
                     &parsed.path,
@@ -360,7 +373,13 @@ impl Rule for InsecureCryptoRule {
             }
 
             // SHA-1 - deprecated for security
-            if lower.contains("sha1") && !lower.contains("sha1sum") && (lower.contains("hash") || lower.contains("digest") || lower.contains("::") || lower.contains("import")) {
+            if lower.contains("sha1")
+                && !lower.contains("sha1sum")
+                && (lower.contains("hash")
+                    || lower.contains("digest")
+                    || lower.contains("::")
+                    || lower.contains("import"))
+            {
                 findings.push(create_finding_at_line(
                     self.id(),
                     &parsed.path,
@@ -374,7 +393,9 @@ impl Rule for InsecureCryptoRule {
 
             // DES - broken
             if (lower.contains("des") || lower.contains("3des") || lower.contains("triple_des"))
-                && (lower.contains("encrypt") || lower.contains("cipher") || lower.contains("crypto"))
+                && (lower.contains("encrypt")
+                    || lower.contains("cipher")
+                    || lower.contains("crypto"))
             {
                 findings.push(create_finding_at_line(
                     self.id(),
@@ -388,7 +409,11 @@ impl Rule for InsecureCryptoRule {
             }
 
             // RC4 - broken
-            if lower.contains("rc4") && (lower.contains("cipher") || lower.contains("crypto") || lower.contains("encrypt")) {
+            if lower.contains("rc4")
+                && (lower.contains("cipher")
+                    || lower.contains("crypto")
+                    || lower.contains("encrypt"))
+            {
                 findings.push(create_finding_at_line(
                     self.id(),
                     &parsed.path,
@@ -401,7 +426,9 @@ impl Rule for InsecureCryptoRule {
             }
 
             // ECB mode - insecure
-            if lower.contains("ecb") && (lower.contains("mode") || lower.contains("cipher") || lower.contains("aes")) {
+            if lower.contains("ecb")
+                && (lower.contains("mode") || lower.contains("cipher") || lower.contains("aes"))
+            {
                 findings.push(create_finding_at_line(
                     self.id(),
                     &parsed.path,

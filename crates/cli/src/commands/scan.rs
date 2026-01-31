@@ -1,8 +1,8 @@
 //! Scan command implementation
 
+use crate::OutputFormat;
 use crate::output;
 use crate::ui::{progress, theme::Theme};
-use crate::OutputFormat;
 use anyhow::Result;
 use colored::Colorize;
 use rma_analyzer::AnalyzerEngine;
@@ -138,18 +138,10 @@ fn print_scan_header(args: &ScanArgs, toml_config: Option<&RmaTomlConfig>, profi
         args.path.display().to_string().bright_white()
     );
 
-    println!(
-        "  {} {}",
-        "Profile:".dimmed(),
-        profile.to_string().cyan()
-    );
+    println!("  {} {}", "Profile:".dimmed(), profile.to_string().cyan());
 
     if toml_config.is_some() {
-        println!(
-            "  {} {}",
-            "Config:".dimmed(),
-            "rma.toml".green()
-        );
+        println!("  {} {}", "Config:".dimmed(), "rma.toml".green());
     }
 
     if let Some(ref langs) = args.languages {
@@ -161,11 +153,7 @@ fn print_scan_header(args: &ScanArgs, toml_config: Option<&RmaTomlConfig>, profi
     }
 
     if let Some(ref ruleset) = args.ruleset {
-        println!(
-            "  {} {}",
-            "Ruleset:".dimmed(),
-            ruleset.cyan()
-        );
+        println!("  {} {}", "Ruleset:".dimmed(), ruleset.cyan());
     }
 
     if args.ai_analysis {

@@ -1,7 +1,7 @@
 //! Code metrics computation
 
 use rma_common::{CodeMetrics, Language};
-use rma_parser::{traverse_ast, AstVisitor, ParsedFile};
+use rma_parser::{AstVisitor, ParsedFile, traverse_ast};
 use tree_sitter::Node;
 
 /// Compute metrics for a parsed file

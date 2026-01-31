@@ -1,7 +1,7 @@
 //! Sled-based key-value store for metadata and caching
 
 use anyhow::Result;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::path::Path;
 
 /// A simple key-value store backed by sled
