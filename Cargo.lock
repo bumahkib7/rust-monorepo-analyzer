@@ -2515,7 +2515,7 @@ dependencies = [
 
 [[package]]
 name = "rma-ai"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2532,7 +2532,7 @@ dependencies = [
 
 [[package]]
 name = "rma-analyzer"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "petgraph",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "rma-cli"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2584,7 +2584,7 @@ dependencies = [
 
 [[package]]
 name = "rma-common"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2599,7 +2599,7 @@ dependencies = [
 
 [[package]]
 name = "rma-daemon"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2620,7 +2620,7 @@ dependencies = [
 
 [[package]]
 name = "rma-indexer"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "notify",
@@ -2639,7 +2639,7 @@ dependencies = [
 
 [[package]]
 name = "rma-lsp"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2658,7 +2658,7 @@ dependencies = [
 
 [[package]]
 name = "rma-parser"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2683,7 +2683,7 @@ dependencies = [
 
 [[package]]
 name = "rma-plugins"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2962,9 +2962,9 @@ dependencies = [
 
 [[package]]
 name = "slab"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
+checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "sled"
