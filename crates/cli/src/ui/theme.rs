@@ -1,5 +1,7 @@
 //! Color theme definitions for the CLI
 
+#![allow(dead_code)]
+
 use colored::{Color, Colorize};
 
 /// Theme for CLI output

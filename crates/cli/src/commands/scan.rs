@@ -12,6 +12,7 @@ use rma_parser::ParserEngine;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+#[allow(dead_code)]
 pub struct ScanArgs {
     pub path: PathBuf,
     pub format: OutputFormat,

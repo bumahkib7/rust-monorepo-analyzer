@@ -1,5 +1,7 @@
 //! Error handling and display utilities
 
+#![allow(dead_code)]
+
 use anyhow::Error;
 use colored::Colorize;
 

@@ -29,6 +29,7 @@ pub fn format_results(
 }
 
 /// Write output to file or stdout
+#[allow(dead_code)]
 pub fn write_output(content: &str, output_file: Option<PathBuf>) -> Result<()> {
     if let Some(path) = output_file {
         std::fs::write(&path, content)?;

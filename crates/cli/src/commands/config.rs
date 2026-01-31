@@ -100,9 +100,7 @@ fn print_config_tree(value: &serde_json::Value, prefix: &str) {
                         serde_json::Value::String(s) => format!("\"{}\"", s).green(),
                         serde_json::Value::Bool(b) => b.to_string().yellow(),
                         serde_json::Value::Number(n) => n.to_string().bright_blue(),
-                        serde_json::Value::Array(arr) => {
-                            format!("[{} items]", arr.len()).dimmed()
-                        }
+                        serde_json::Value::Array(arr) => format!("[{} items]", arr.len()).dimmed(),
                         _ => val.to_string().dimmed(),
                     };
                     println!("    {}: {}", key.bright_white(), formatted_val);
