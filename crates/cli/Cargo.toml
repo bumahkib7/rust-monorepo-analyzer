@@ -10,13 +10,13 @@ name = "rma"
 path = "src/main.rs"
 
 [dependencies]
-rma-common = { path = "../common" }
-rma-parser = { path = "../parser" }
-rma-analyzer = { path = "../analyzer" }
-rma-indexer = { path = "../indexer" }
-rma-ai = { path = "../ai" }
-rma-daemon = { path = "../daemon" }
-rma-plugins = { path = "../plugins" }
+rma-common = { version = "0.1.0", path = "../common" }
+rma-parser = { version = "0.1.0", path = "../parser" }
+rma-analyzer = { version = "0.1.0", path = "../analyzer" }
+rma-indexer = { version = "0.1.0", path = "../indexer" }
+rma-ai = { version = "0.1.0", path = "../ai" }
+rma-daemon = { version = "0.1.0", path = "../daemon" }
+rma-plugins = { version = "0.1.0", path = "../plugins" }
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive", "env", "string"] }
 clap_complete = "4.5"
