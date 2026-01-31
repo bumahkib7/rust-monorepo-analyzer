@@ -8,6 +8,7 @@ use rma_common::Severity;
 use rma_indexer::{IndexConfig, IndexerEngine};
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 pub struct SearchArgs {
     pub query: String,
     pub repo: PathBuf,

@@ -1,5 +1,7 @@
 //! Progress bar utilities
 
+#![allow(dead_code)]
+
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::time::Duration;

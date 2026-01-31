@@ -20,6 +20,7 @@ pub fn create_table() -> Table {
 }
 
 /// Output a findings table
+#[allow(dead_code)]
 pub fn output_findings_table(results: &[FileAnalysis]) {
     let mut table = create_table();
 
@@ -67,6 +68,7 @@ pub fn output_findings_table(results: &[FileAnalysis]) {
 }
 
 /// Output a summary table
+#[allow(dead_code)]
 pub fn output_summary_table(summary: &AnalysisSummary, duration: Duration) {
     let mut table = create_table();
 
