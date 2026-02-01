@@ -10,6 +10,7 @@ pub mod init;
 pub mod plugin;
 pub mod scan;
 pub mod search;
+pub mod security;
 pub mod stats;
 pub mod suppress;
 pub mod watch;
