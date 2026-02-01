@@ -4,9 +4,10 @@ use crate::ui::theme::Theme;
 use anyhow::Result;
 use colored::Colorize;
 use rma_analyzer::providers::{
-    AnalysisProvider, GosecProvider, OsvProvider, OxcNativeProvider, OxlintProvider, PmdProvider,
-    RustSecProvider,
+    AnalysisProvider, GosecProvider, OsvProvider, OxlintProvider, PmdProvider, RustSecProvider,
 };
+#[cfg(feature = "oxc")]
+use rma_analyzer::providers::OxcNativeProvider;
 use rma_common::{GosecProviderConfig, Language, OsvProviderConfig, PmdProviderConfig, RmaConfig};
 use rma_parser::ParserEngine;
 use std::path::Path;
@@ -251,18 +252,29 @@ fn check_providers(verbose: bool) {
     );
 
     // Oxc native - native Rust linter using oxc_linter
-    let oxc = OxcNativeProvider::new();
-    if oxc.is_available() {
-        let version = oxc.version().unwrap_or_else(|| "unknown".to_string());
+    #[cfg(feature = "oxc")]
+    {
+        let oxc = OxcNativeProvider::new();
+        if oxc.is_available() {
+            let version = oxc.version().unwrap_or_else(|| "unknown".to_string());
+            println!(
+                "  {} {} v{} (native JS/TS linting, 520+ rules)",
+                Theme::success_mark(),
+                "oxc".green(),
+                version
+            );
+        } else {
+            println!(
+                "  {} {} (not available)",
+                Theme::info_mark(),
+                "oxc".dimmed()
+            );
+        }
+    }
+    #[cfg(not(feature = "oxc"))]
+    {
         println!(
-            "  {} {} v{} (native JS/TS linting, 520+ rules)",
-            Theme::success_mark(),
-            "oxc".green(),
-            version
-        );
-    } else {
-        println!(
-            "  {} {} (not available)",
+            "  {} {} (not compiled - oxc feature disabled)",
             Theme::info_mark(),
             "oxc".dimmed()
         );

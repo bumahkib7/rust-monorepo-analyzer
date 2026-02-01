@@ -147,12 +147,13 @@ jobs:
             ~/.cargo/git/db/
           key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Strip oxc deps from analyzer (not on crates.io)
+      - name: Strip oxc deps for crates.io publishing
         run: |
           # oxc_linter and related crates are NOT published to crates.io
           # We need to remove them from Cargo.toml for publishing
+
+          # Strip from analyzer
           cd crates/analyzer
-          # Remove the oxc feature definition and dependencies
           sed -i '/^oxc = \[/,/^\]/d' Cargo.toml
           sed -i '/^default = \["oxc"\]/d' Cargo.toml
           sed -i '/oxc_linter/d' Cargo.toml
@@ -162,9 +163,17 @@ jobs:
           sed -i '/oxc_parser/d' Cargo.toml
           sed -i '/oxc_semantic/d' Cargo.toml
           sed -i '/oxc_ast/d' Cargo.toml
-          # Remove empty [features] section if it exists
           sed -i '/^\[features\]$/,/^\[/{/^\[features\]$/d;/^$/d}' Cargo.toml
-          echo "Modified Cargo.toml for publishing:"
+          echo "=== Modified analyzer Cargo.toml ==="
+          cat Cargo.toml
+          cd ../..
+
+          # Strip oxc feature from CLI (depends on analyzer/oxc)
+          cd crates/cli
+          sed -i '/^oxc = \["rma-analyzer\/oxc"\]/d' Cargo.toml
+          sed -i '/^default = \["oxc"\]/d' Cargo.toml
+          sed -i '/^\[features\]$/,/^\[/{/^\[features\]$/d;/^$/d}' Cargo.toml
+          echo "=== Modified cli Cargo.toml ==="
           cat Cargo.toml
 
       - name: Publish crates
