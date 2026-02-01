@@ -72,8 +72,8 @@ tempfile = "3.16"
 pretty_assertions = "1.4"
 
 # WASM plugin system
-wasmtime = "29"
-wit-bindgen = "0.36"
+wasmtime = "41"
+wit-bindgen = "0.40"
 
 # LSP
 tower-lsp = "0.20"
@@ -83,7 +83,7 @@ async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Git integration
-gix = { version = "0.70", default-features = false, features = ["max-performance"] }
+gix = { version = "0.74", default-features = false, features = ["max-performance"] }
 
 # Rust security advisory database
 rustsec = "0.31"
