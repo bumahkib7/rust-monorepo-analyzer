@@ -42,6 +42,7 @@ sha2 = "0.10"
 crossterm = "0.28"
 futures = "0.3"
 walkdir = "2"
+regex = "1"
 
 [dev-dependencies]
 tempfile.workspace = true

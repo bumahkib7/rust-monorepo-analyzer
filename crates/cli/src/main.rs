@@ -344,6 +344,46 @@ pub enum Commands {
         #[arg(default_value = ".", global = true)]
         path: PathBuf,
     },
+
+    /// Run comprehensive security audit (dependencies, Docker, code)
+    #[command(visible_alias = "audit")]
+    Security {
+        /// Path to scan
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Output format (pretty, json, sarif, markdown)
+        #[arg(short, long, default_value = "pretty")]
+        format: String,
+
+        /// Minimum severity to report (critical, high, medium, low)
+        #[arg(short, long, default_value = "medium")]
+        severity: String,
+
+        /// Show detailed CVE information and references
+        #[arg(short, long)]
+        details: bool,
+
+        /// Show recommended fix commands
+        #[arg(long)]
+        fix: bool,
+
+        /// Use cached data only (no network requests)
+        #[arg(long)]
+        offline: bool,
+
+        /// Skip Docker/container scanning
+        #[arg(long)]
+        skip_docker: bool,
+
+        /// Skip dependency vulnerability scanning
+        #[arg(long)]
+        skip_deps: bool,
+
+        /// Skip code security analysis
+        #[arg(long)]
+        skip_code: bool,
+    },
 }
 
 /// Suppress subcommands
@@ -825,6 +865,37 @@ fn main() -> Result<()> {
                 action: suppress_action,
                 path,
                 quiet: cli.quiet,
+            })
+        }
+
+        Commands::Security {
+            path,
+            format,
+            severity,
+            details,
+            fix,
+            offline,
+            skip_docker,
+            skip_deps,
+            skip_code,
+        } => {
+            let severity = match severity.to_lowercase().as_str() {
+                "critical" => rma_common::Severity::Critical,
+                "high" => rma_common::Severity::Error,
+                "medium" => rma_common::Severity::Warning,
+                "low" | _ => rma_common::Severity::Info,
+            };
+            let format = format.parse().unwrap_or_default();
+            commands::security::run(commands::security::SecurityArgs {
+                path,
+                format,
+                severity,
+                details,
+                fix,
+                offline,
+                skip_docker,
+                skip_deps,
+                skip_code,
             })
         }
     };
