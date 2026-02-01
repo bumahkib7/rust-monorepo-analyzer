@@ -19,6 +19,7 @@ use rma_common::{
 };
 use rma_parser::ParsedFile;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
@@ -52,6 +53,8 @@ pub struct AnalysisSummary {
 pub struct AnalyzerEngine {
     config: Arc<RmaConfig>,
     rules: Vec<Box<dyn rules::Rule + Send + Sync>>,
+    /// Pre-filtered rule indices by language for O(1) lookup
+    rules_by_language: HashMap<Language, Vec<usize>>,
     provider_registry: ProviderRegistry,
     enabled_providers: Vec<ProviderType>,
 }
@@ -67,12 +70,38 @@ impl AnalyzerEngine {
         let mut engine = Self {
             config: Arc::new(config),
             rules: Vec::new(),
+            rules_by_language: HashMap::new(),
             provider_registry: ProviderRegistry::new(),
             enabled_providers: providers_config.enabled.clone(),
         };
         engine.register_default_rules();
+        engine.build_language_index();
         engine.register_providers(&providers_config);
         engine
+    }
+
+    /// Build index of rules by language for O(1) lookup
+    fn build_language_index(&mut self) {
+        let languages = [
+            Language::Rust,
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Python,
+            Language::Go,
+            Language::Java,
+            Language::Unknown,
+        ];
+
+        for lang in languages {
+            let indices: Vec<usize> = self
+                .rules
+                .iter()
+                .enumerate()
+                .filter(|(_, rule)| rule.applies_to(lang))
+                .map(|(i, _)| i)
+                .collect();
+            self.rules_by_language.insert(lang, indices);
+        }
     }
 
     /// Register external providers based on configuration
@@ -119,6 +148,17 @@ impl AnalyzerEngine {
                     } else {
                         warn!(
                             "RustSec provider enabled but database unavailable - check network connection"
+                        );
+                    }
+                }
+                ProviderType::Gosec => {
+                    let gosec = providers::GosecProvider::new(config.gosec.clone());
+                    if gosec.is_available() {
+                        info!("Gosec provider registered (version: {:?})", gosec.version());
+                        self.provider_registry.register(Box::new(gosec));
+                    } else {
+                        warn!(
+                            "Gosec provider enabled but not available - install gosec: go install github.com/securego/gosec/v2/cmd/gosec@latest"
                         );
                     }
                 }
@@ -260,10 +300,10 @@ impl AnalyzerEngine {
 
         let mut findings = Vec::new();
 
-        // Run all applicable native rules
-        for rule in &self.rules {
-            if rule.applies_to(parsed.language) {
-                let rule_findings = rule.check(parsed);
+        // Run only applicable rules using pre-built language index (O(1) lookup)
+        if let Some(rule_indices) = self.rules_by_language.get(&parsed.language) {
+            for &idx in rule_indices {
+                let rule_findings = self.rules[idx].check(parsed);
                 findings.extend(rule_findings);
             }
         }
@@ -380,22 +420,22 @@ impl AnalyzerEngine {
             self.provider_registry.providers().len()
         );
 
-        // Step 1: Run native rules in parallel
-        let mut results: Vec<FileAnalysis> = files
+        // Step 1: Run native rules in parallel using pre-indexed rules
+        let results: Vec<FileAnalysis> = files
             .par_iter()
             .filter_map(|parsed| {
                 let metrics = metrics::compute_metrics(parsed);
                 let mut findings = Vec::new();
 
-                // Run native rules only
-                for rule in &self.rules {
-                    if rule.applies_to(parsed.language) {
-                        findings.extend(rule.check(parsed));
+                // Run only applicable rules using pre-built language index
+                if let Some(rule_indices) = self.rules_by_language.get(&parsed.language) {
+                    for &idx in rule_indices {
+                        findings.extend(self.rules[idx].check(parsed));
                     }
                 }
 
                 Some(FileAnalysis {
-                    path: parsed.path.to_string_lossy().to_string(),
+                    path: parsed.path.display().to_string(),
                     language: parsed.language,
                     metrics,
                     findings,
@@ -403,24 +443,34 @@ impl AnalyzerEngine {
             })
             .collect();
 
-        // Step 2: Run providers on the directory (more efficient for tools like PMD)
+        // Step 2: Build HashMap for O(1) result lookups
+        let mut results_map: HashMap<String, FileAnalysis> =
+            results.into_iter().map(|r| (r.path.clone(), r)).collect();
+
+        // Step 3: Run providers on the directory (more efficient for tools like PMD)
         let provider_findings = self.analyze_directory_with_providers(base_path)?;
 
-        // Step 3: Merge provider findings into file results
+        // Step 4: Merge provider findings into file results using O(1) HashMap lookup
         for finding in provider_findings {
-            let file_path = finding.location.file.to_string_lossy().to_string();
-            if let Some(result) = results.iter_mut().find(|r| r.path == file_path) {
+            let file_path = finding.location.file.display().to_string();
+            if let Some(result) = results_map.get_mut(&file_path) {
                 result.findings.push(finding);
             } else {
                 // File wasn't in parsed files - create a new result
-                results.push(FileAnalysis {
-                    path: file_path,
-                    language: finding.language,
-                    metrics: CodeMetrics::default(),
-                    findings: vec![finding],
-                });
+                results_map.insert(
+                    file_path.clone(),
+                    FileAnalysis {
+                        path: file_path,
+                        language: finding.language,
+                        metrics: CodeMetrics::default(),
+                        findings: vec![finding],
+                    },
+                );
             }
         }
+
+        // Convert back to Vec
+        let mut results: Vec<FileAnalysis> = results_map.into_values().collect();
 
         // Step 4: Filter by severity
         for result in &mut results {

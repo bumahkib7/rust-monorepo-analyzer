@@ -31,6 +31,7 @@ struct BenchmarkResults {
     analyze: PhaseStats,
     full_pipeline: PhaseStats,
     throughput: Throughput,
+    wall_clock_seconds: f64,
 }
 
 #[derive(Serialize)]
@@ -48,6 +49,8 @@ struct Throughput {
 }
 
 pub fn run(args: BenchArgs) -> Result<()> {
+    let command_start = Instant::now();
+
     // Build config with exclude patterns
     let mut config = RmaConfig::default();
     let exclude_patterns = args.exclude.clone().unwrap_or_default();
@@ -134,6 +137,8 @@ pub fn run(args: BenchArgs) -> Result<()> {
     let total_lines: usize = files.iter().map(|f| f.content.lines().count()).sum();
     let avg_full_time = average(&full_times);
 
+    let wall_clock = command_start.elapsed();
+
     match args.format {
         BenchFormat::Json => {
             let results = BenchmarkResults {
@@ -150,6 +155,7 @@ pub fn run(args: BenchArgs) -> Result<()> {
                     files_per_second: files.len() as f64 / avg_full_time.as_secs_f64(),
                     lines_per_second: total_lines as f64 / avg_full_time.as_secs_f64(),
                 },
+                wall_clock_seconds: wall_clock.as_secs_f64(),
             };
             println!("{}", serde_json::to_string_pretty(&results)?);
         }
@@ -193,6 +199,15 @@ pub fn run(args: BenchArgs) -> Result<()> {
             for (lang, count) in counts {
                 println!("  {:12} {}", format!("{:?}", lang).cyan(), count);
             }
+            println!();
+
+            // Wall-clock time
+            println!("{}", Theme::separator(60));
+            println!(
+                "  {} {}",
+                "Total wall-clock time:".bright_white().bold(),
+                format_duration(wall_clock).green().bold()
+            );
             println!();
         }
     }
@@ -272,5 +287,18 @@ fn times_to_stats(times: &[Duration]) -> PhaseStats {
         max_ms: max.as_secs_f64() * 1000.0,
         avg_ms: avg.as_secs_f64() * 1000.0,
         stddev_ms: stddev.as_secs_f64() * 1000.0,
+    }
+}
+
+fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs_f64();
+    if secs < 1.0 {
+        format!("{:.0}ms", secs * 1000.0)
+    } else if secs < 60.0 {
+        format!("{:.2}s", secs)
+    } else {
+        let mins = (secs / 60.0).floor();
+        let remaining_secs = secs - (mins * 60.0);
+        format!("{}m {:.1}s", mins as u64, remaining_secs)
     }
 }

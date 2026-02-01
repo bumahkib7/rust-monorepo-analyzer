@@ -6,8 +6,81 @@ use crate::rules::{Rule, create_finding, create_finding_at_line};
 use regex::Regex;
 use rma_common::{Finding, Language, Severity};
 use rma_parser::ParsedFile;
+use std::collections::HashSet;
+use std::path::Path;
 use std::sync::LazyLock;
 use tree_sitter::Node;
+
+// =============================================================================
+// TEST FILE DETECTION - Skip false positives in test/fixture/example files
+// =============================================================================
+
+/// Check if a file path indicates a test, fixture, or example file
+/// These files commonly contain fake secrets for testing purposes
+#[inline]
+pub fn is_test_or_fixture_file(path: &Path) -> bool {
+    let path_str = path.to_string_lossy().to_lowercase();
+
+    // Directory patterns that indicate test/fixture/example code
+    if path_str.contains("/test/")
+        || path_str.contains("/tests/")
+        || path_str.contains("/testing/")
+        || path_str.contains("/__tests__/")
+        || path_str.contains("/spec/")
+        || path_str.contains("/specs/")
+        || path_str.contains("/fixture/")
+        || path_str.contains("/fixtures/")
+        || path_str.contains("/testdata/")
+        || path_str.contains("/test_data/")
+        || path_str.contains("/mock/")
+        || path_str.contains("/mocks/")
+        || path_str.contains("/fake/")
+        || path_str.contains("/fakes/")
+        || path_str.contains("/stub/")
+        || path_str.contains("/stubs/")
+        || path_str.contains("/example/")
+        || path_str.contains("/examples/")
+        || path_str.contains("/sample/")
+        || path_str.contains("/samples/")
+        || path_str.contains("/demo/")
+        || path_str.contains("/testutil/")
+        || path_str.contains("/testutils/")
+    {
+        return true;
+    }
+
+    // File name patterns
+    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+        let name_lower = file_name.to_lowercase();
+
+        // Test file naming conventions
+        if name_lower.starts_with("test_")
+            || name_lower.starts_with("test.")
+            || name_lower.ends_with("_test.go")
+            || name_lower.ends_with("_test.rs")
+            || name_lower.ends_with("_test.py")
+            || name_lower.ends_with(".test.js")
+            || name_lower.ends_with(".test.ts")
+            || name_lower.ends_with(".test.jsx")
+            || name_lower.ends_with(".test.tsx")
+            || name_lower.ends_with(".spec.js")
+            || name_lower.ends_with(".spec.ts")
+            || name_lower.ends_with(".spec.jsx")
+            || name_lower.ends_with(".spec.tsx")
+            || name_lower.ends_with("_spec.rb")
+            || name_lower.contains("_mock")
+            || name_lower.contains("_fake")
+            || name_lower.contains("_stub")
+            || name_lower.contains("_fixture")
+            || name_lower == "conftest.py"
+            || name_lower == "setup_test.go"
+        {
+            return true;
+        }
+    }
+
+    false
+}
 
 // Regex patterns for security checks
 //
@@ -557,6 +630,11 @@ impl Rule for HardcodedSecretRule {
     }
 
     fn check(&self, parsed: &ParsedFile) -> Vec<Finding> {
+        // Skip test/fixture files - they commonly contain fake secrets for testing
+        if is_test_or_fixture_file(&parsed.path) {
+            return Vec::new();
+        }
+
         let mut findings = Vec::new();
 
         for (line_num, line) in parsed.content.lines().enumerate() {
@@ -832,9 +910,12 @@ fn find_nodes_by_kinds<F>(cursor: &mut tree_sitter::TreeCursor, kinds: &[&str], 
 where
     F: FnMut(Node),
 {
+    // Use HashSet for O(1) lookups instead of O(n) array contains
+    let kinds_set: HashSet<&str> = kinds.iter().copied().collect();
+
     loop {
         let node = cursor.node();
-        if kinds.contains(&node.kind()) {
+        if kinds_set.contains(node.kind()) {
             callback(node);
         }
         if cursor.goto_first_child() {
@@ -851,34 +932,66 @@ where
     }
 }
 
+/// Pre-computed branch kinds as HashSets for O(1) lookup
+static RUST_BRANCH_KINDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "if_expression",
+        "match_expression",
+        "while_expression",
+        "for_expression",
+    ]
+    .into_iter()
+    .collect()
+});
+
+static JS_BRANCH_KINDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "if_statement",
+        "switch_statement",
+        "for_statement",
+        "while_statement",
+    ]
+    .into_iter()
+    .collect()
+});
+
+static PYTHON_BRANCH_KINDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "if_statement",
+        "for_statement",
+        "while_statement",
+        "try_statement",
+    ]
+    .into_iter()
+    .collect()
+});
+
+static GO_BRANCH_KINDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    ["if_statement", "for_statement", "switch_statement"]
+        .into_iter()
+        .collect()
+});
+
+static JAVA_BRANCH_KINDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "if_statement",
+        "for_statement",
+        "while_statement",
+        "switch_expression",
+    ]
+    .into_iter()
+    .collect()
+});
+
 fn count_branches(node: &Node, lang: Language) -> usize {
-    let branch_kinds: &[&str] = match lang {
-        Language::Rust => &[
-            "if_expression",
-            "match_expression",
-            "while_expression",
-            "for_expression",
-        ],
-        Language::JavaScript | Language::TypeScript => &[
-            "if_statement",
-            "switch_statement",
-            "for_statement",
-            "while_statement",
-        ],
-        Language::Python => &[
-            "if_statement",
-            "for_statement",
-            "while_statement",
-            "try_statement",
-        ],
-        Language::Go => &["if_statement", "for_statement", "switch_statement"],
-        Language::Java => &[
-            "if_statement",
-            "for_statement",
-            "while_statement",
-            "switch_expression",
-        ],
-        Language::Unknown => &[],
+    // Use pre-computed HashSets for O(1) lookup
+    let branch_kinds: &HashSet<&str> = match lang {
+        Language::Rust => &RUST_BRANCH_KINDS,
+        Language::JavaScript | Language::TypeScript => &JS_BRANCH_KINDS,
+        Language::Python => &PYTHON_BRANCH_KINDS,
+        Language::Go => &GO_BRANCH_KINDS,
+        Language::Java => &JAVA_BRANCH_KINDS,
+        Language::Unknown => return 1,
     };
 
     let mut count = 1;
@@ -886,7 +999,7 @@ fn count_branches(node: &Node, lang: Language) -> usize {
 
     loop {
         let current = cursor.node();
-        if branch_kinds.contains(&current.kind()) {
+        if branch_kinds.contains(current.kind()) {
             count += 1;
         }
         if cursor.goto_first_child() {
@@ -900,5 +1013,119 @@ fn count_branches(node: &Node, lang: Language) -> usize {
                 return count;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_test_or_fixture_file_directories() {
+        // Should match test directories
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/test/utils/helper.go"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/tests/integration.py"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/__tests__/component.test.js"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/spec/models/user_spec.rb"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/fixtures/data.json"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/testdata/sample.txt"
+        )));
+        assert!(is_test_or_fixture_file(Path::new("/project/mocks/api.ts")));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/examples/demo.go"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/testutil/admission_webhook.go"
+        )));
+
+        // Should NOT match production directories
+        assert!(!is_test_or_fixture_file(Path::new("/project/src/main.go")));
+        assert!(!is_test_or_fixture_file(Path::new("/project/lib/utils.py")));
+        assert!(!is_test_or_fixture_file(Path::new(
+            "/project/pkg/handler.go"
+        )));
+        assert!(!is_test_or_fixture_file(Path::new(
+            "/project/cmd/server/main.go"
+        )));
+    }
+
+    #[test]
+    fn test_is_test_or_fixture_file_names() {
+        // Should match test file names
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/src/handler_test.go"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/src/utils_test.rs"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/src/test_handler.py"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/src/component.test.js"
+        )));
+        assert!(is_test_or_fixture_file(Path::new(
+            "/project/src/component.spec.ts"
+        )));
+        assert!(is_test_or_fixture_file(Path::new("/project/conftest.py")));
+        assert!(is_test_or_fixture_file(Path::new("/project/api_mock.go")));
+
+        // Should NOT match production file names
+        assert!(!is_test_or_fixture_file(Path::new("/project/src/main.go")));
+        assert!(!is_test_or_fixture_file(Path::new(
+            "/project/src/handler.py"
+        )));
+        assert!(!is_test_or_fixture_file(Path::new("/project/src/utils.ts")));
+        assert!(!is_test_or_fixture_file(Path::new(
+            "/project/pkg/testing_helper.go"
+        ))); // "testing" in name but not a test file pattern
+    }
+
+    #[test]
+    fn test_hardcoded_secret_skips_test_files() {
+        use rma_common::RmaConfig;
+        use rma_parser::ParserEngine;
+
+        let config = RmaConfig::default();
+        let parser = ParserEngine::new(config);
+
+        // Code with hardcoded secret
+        let content = r#"
+var LocalhostKey = []byte(`-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA1Z5/aTwqY706M34tn60l8ZHkanWDl8mM1pYf4Q7qg3zA9XqW
+-----END RSA PRIVATE KEY-----`)
+"#;
+
+        // In a test file - should NOT produce findings
+        let parsed_test = parser
+            .parse_file(Path::new("/project/test/utils/webhook.go"), content)
+            .unwrap();
+        let rule = HardcodedSecretRule;
+        let findings_test = rule.check(&parsed_test);
+        assert!(
+            findings_test.is_empty(),
+            "Should skip secrets in test files"
+        );
+
+        // In a production file - SHOULD produce findings
+        let parsed_prod = parser
+            .parse_file(Path::new("/project/pkg/webhook.go"), content)
+            .unwrap();
+        let findings_prod = rule.check(&parsed_prod);
+        assert!(
+            !findings_prod.is_empty(),
+            "Should detect secrets in production files"
+        );
     }
 }

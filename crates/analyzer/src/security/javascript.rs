@@ -6,6 +6,7 @@
 use crate::rules::{Rule, create_finding, create_finding_with_confidence};
 use rma_common::{Confidence, Finding, Language, Severity};
 use rma_parser::ParsedFile;
+use std::collections::HashSet;
 use tree_sitter::Node;
 
 /// DETECTS dangerous dynamic code execution patterns (security vulnerability detection)
@@ -330,8 +331,8 @@ impl Rule for JsxScriptUrlRule {
 
         find_nodes_by_kind(&mut cursor, "string", |node: Node| {
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes()) {
-                let lower = text.to_lowercase();
-                if lower.contains("javascript:") {
+                // Use case-insensitive search without allocation
+                if contains_ignore_case(text, "javascript:") {
                     findings.push(create_finding_with_confidence(
                         self.id(),
                         &node,
@@ -347,6 +348,15 @@ impl Rule for JsxScriptUrlRule {
         });
         findings
     }
+}
+
+/// Case-insensitive substring search without allocation
+#[inline]
+fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 /// DETECTS React's dangerous HTML escape hatch
@@ -367,6 +377,7 @@ impl Rule for DangerousHtmlRule {
 
     fn check(&self, parsed: &ParsedFile) -> Vec<Finding> {
         let mut findings = Vec::new();
+        let mut seen_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut cursor = parsed.tree.walk();
 
         // The prop name we're looking for (React's raw HTML prop)
@@ -376,6 +387,8 @@ impl Rule for DangerousHtmlRule {
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes())
                 && text == DANGEROUS_PROP
             {
+                let line = node.start_position().row + 1;
+                seen_lines.insert(line);
                 findings.push(create_finding_with_confidence(
                     self.id(),
                     &node,
@@ -391,12 +404,13 @@ impl Rule for DangerousHtmlRule {
 
         cursor = parsed.tree.walk();
         find_nodes_by_kind(&mut cursor, "jsx_attribute", |node: Node| {
+            let line = node.start_position().row + 1;
             if let Ok(text) = node.utf8_text(parsed.content.as_bytes())
                 && text.contains(DANGEROUS_PROP)
-                && !findings
-                    .iter()
-                    .any(|f| f.location.start_line == node.start_position().row + 1)
+                && !seen_lines.contains(&line)
+            // O(1) lookup instead of O(n)
             {
+                seen_lines.insert(line);
                 findings.push(create_finding_with_confidence(
                     self.id(),
                     &node,
@@ -559,7 +573,11 @@ impl Rule for StrictEqualityRule {
     }
 }
 
-/// DETECTS assignment in conditions
+/// DETECTS assignment in conditions (if/while/for/do-while)
+///
+/// Only flags assignments inside actual control flow conditions, NOT:
+/// - Ternary expressions in JSX/template literals (these are intentional)
+/// - Assignments wrapped in parentheses and compared (intentional pattern)
 pub struct NoConditionAssignRule;
 
 impl Rule for NoConditionAssignRule {
@@ -579,31 +597,30 @@ impl Rule for NoConditionAssignRule {
         let mut findings = Vec::new();
         let mut cursor = parsed.tree.walk();
 
-        find_nodes_by_kind(&mut cursor, "if_statement", |node: Node| {
-            if let Some(condition) = node.child_by_field_name("condition") {
-                check_assignment_in_expr(&condition, parsed, self.id(), &mut findings);
-            }
-        });
-
-        cursor = parsed.tree.walk();
-        find_nodes_by_kind(&mut cursor, "while_statement", |node: Node| {
-            if let Some(condition) = node.child_by_field_name("condition") {
-                check_assignment_in_expr(&condition, parsed, self.id(), &mut findings);
-            }
-        });
-
-        cursor = parsed.tree.walk();
-        find_nodes_by_kind(&mut cursor, "ternary_expression", |node: Node| {
-            if let Some(condition) = node.child_by_field_name("condition") {
-                check_assignment_in_expr(&condition, parsed, self.id(), &mut findings);
-            }
-        });
+        // Only check actual control flow statements, NOT ternary expressions
+        // Ternaries in JSX/template literals are intentional and not bugs
+        find_nodes_by_kinds(
+            &mut cursor,
+            &[
+                "if_statement",
+                "while_statement",
+                "do_statement",
+                "for_statement",
+            ],
+            |node: Node| {
+                if let Some(condition) = node.child_by_field_name("condition") {
+                    check_assignment_in_condition(&condition, parsed, self.id(), &mut findings);
+                }
+            },
+        );
 
         findings
     }
 }
 
-fn check_assignment_in_expr(
+/// Check for assignment expressions in a condition
+/// Skips intentional patterns like: if ((match = regex.exec(str)) !== null)
+fn check_assignment_in_condition(
     node: &Node,
     parsed: &ParsedFile,
     rule_id: &str,
@@ -613,16 +630,22 @@ fn check_assignment_in_expr(
     loop {
         let current = cursor.node();
         if current.kind() == "assignment_expression" {
-            findings.push(create_finding_with_confidence(
-                rule_id,
-                &current,
-                &parsed.path,
-                &parsed.content,
-                Severity::Error,
-                "Assignment in condition - did you mean === ?",
-                Language::JavaScript,
-                Confidence::High,
-            ));
+            // Skip if the assignment is part of a comparison (intentional pattern)
+            // e.g., if ((x = getValue()) !== null)
+            let is_intentional = is_intentional_assignment(&current, parsed);
+
+            if !is_intentional {
+                findings.push(create_finding_with_confidence(
+                    rule_id,
+                    &current,
+                    &parsed.path,
+                    &parsed.content,
+                    Severity::Error,
+                    "Assignment in condition - did you mean === ?",
+                    Language::JavaScript,
+                    Confidence::High,
+                ));
+            }
         }
 
         if cursor.goto_first_child() {
@@ -637,6 +660,24 @@ fn check_assignment_in_expr(
             }
         }
     }
+}
+
+/// Check if an assignment is intentional (wrapped in parens and compared)
+fn is_intentional_assignment(node: &Node, parsed: &ParsedFile) -> bool {
+    // Pattern: ((x = getValue()) !== null)
+    // Check if parent is parenthesized_expression and grandparent is binary_expression with comparison
+    if let Some(parent) = node.parent()
+        && parent.kind() == "parenthesized_expression"
+        && let Some(grandparent) = parent.parent()
+        && grandparent.kind() == "binary_expression"
+        && let Ok(text) = grandparent.utf8_text(parsed.content.as_bytes())
+    {
+        return text.contains("===")
+            || text.contains("!==")
+            || text.contains("== ")
+            || text.contains("!= ");
+    }
+    false
 }
 
 /// DETECTS constant conditions
@@ -888,6 +929,35 @@ where
     loop {
         let node = cursor.node();
         if node.kind() == kind {
+            callback(node);
+        }
+
+        if cursor.goto_first_child() {
+            continue;
+        }
+
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
+    }
+}
+
+/// Find nodes matching any of the given kinds in a single tree traversal
+fn find_nodes_by_kinds<F>(cursor: &mut tree_sitter::TreeCursor, kinds: &[&str], mut callback: F)
+where
+    F: FnMut(Node),
+{
+    // Use HashSet for O(1) lookups
+    let kinds_set: HashSet<&str> = kinds.iter().copied().collect();
+
+    loop {
+        let node = cursor.node();
+        if kinds_set.contains(node.kind()) {
             callback(node);
         }
 
@@ -1164,6 +1234,29 @@ mod tests {
             "Assignment in condition should be flagged"
         );
         assert_eq!(findings[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn test_condition_assignment_intentional_not_flagged() {
+        // Intentional pattern: assignment in parens compared to null
+        let content = "while ((match = regex.exec(str)) !== null) { process(match); }";
+        let parsed = parse_js(content);
+        let rule = NoConditionAssignRule;
+        let findings = rule.check(&parsed);
+        assert!(
+            findings.is_empty(),
+            "Intentional assignment pattern should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_ternary_in_jsx_not_flagged() {
+        // Ternary expressions in JSX/template literals are intentional, not bugs
+        let content = r#"const el = <div className={`px-2 ${isActive ? "active" : ""}`} />;"#;
+        let parsed = parse_js(content);
+        let rule = NoConditionAssignRule;
+        let findings = rule.check(&parsed);
+        assert!(findings.is_empty(), "Ternary in JSX should not be flagged");
     }
 
     #[test]

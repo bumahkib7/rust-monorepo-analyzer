@@ -1,7 +1,7 @@
-//! External linter providers
+//! Linter providers for extended language support
 //!
-//! This module provides integration with external linters that can be
-//! used alongside RMA's native rules for extended language coverage.
+//! This module provides integration with linters for extended coverage.
+//! Providers can be native Rust libraries or external CLI tools.
 //!
 //! # Provider Architecture
 //!
@@ -12,14 +12,23 @@
 //!
 //! # Supported Providers
 //!
-//! - `oxlint` - High-performance Rust-native JS/TS linter (500+ rules)
-//! - `pmd` - PMD for comprehensive Java security and quality analysis
-//! - `rustsec` - RustSec Advisory Database for Rust dependency vulnerabilities
+//! ## Native Rust (preferred - no external dependencies)
+//! - `oxc_native` - Native oxc_linter integration (520+ JS/TS rules)
+//! - `rustsec` - RustSec Advisory Database for Rust dependencies
+//!
+//! ## External CLI (fallback - requires installation)
+//! - `oxlint` - oxlint CLI for JS/TS (if native not suitable)
+//! - `pmd` - PMD for Java security and quality analysis
+//! - `gosec` - Go Security Checker for Go security analysis
 
+pub mod gosec;
+pub mod oxc_native;
 pub mod oxlint;
 pub mod pmd;
 pub mod rustsec;
 
+pub use gosec::GosecProvider;
+pub use oxc_native::OxcNativeProvider;
 pub use oxlint::OxlintProvider;
 pub use pmd::PmdProvider;
 pub use rustsec::RustSecProvider;
