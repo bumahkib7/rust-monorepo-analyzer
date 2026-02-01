@@ -59,8 +59,11 @@ docker run -v $(pwd):/workspace ghcr.io/bumahkib7/rma scan /workspace
 - **Fast Indexing**: Tantivy-based full-text search
 - **Incremental Mode**: Only re-analyze changed files
 - **Multiple Output Formats**: Text, JSON, SARIF, Compact, Markdown, GitHub
-- **Watch Mode**: Real-time analysis on file changes
-- **HTTP API**: Daemon mode for IDE integration
+- **Real-time Watch Mode**: WebSocket-based live updates with interactive keyboard controls
+- **HTTP API**: Daemon mode with WebSocket support for IDE integration
+- **IDE Integrations**: VS Code, Neovim, JetBrains, and Web Dashboard
+- **Doctor Command**: Health check for RMA installation (`rma doctor`)
+- **Duplicate Detection**: Find copy-pasted functions across your codebase
 - **WASM Plugins**: Extend with custom analysis rules
 - **External Providers**: Optional integration with PMD for enhanced Java analysis
 - **Shell Completions**: Bash, Zsh, Fish, PowerShell, Elvish
@@ -88,6 +91,12 @@ rma search "TODO" --type content
 
 # View statistics
 rma stats
+
+# Check installation health
+rma doctor
+
+# Scan only changed files in a PR
+rma scan . --changed-only
 ```
 
 ## CLI Commands
@@ -100,6 +109,7 @@ rma stats
 | `stats` | Show index and analysis statistics |
 | `init` | Initialize RMA configuration in current directory |
 | `daemon` | Start HTTP API server for IDE integration |
+| `doctor` | Check RMA installation health and configuration |
 | `plugin` | Manage WASM analysis plugins |
 | `config` | View and modify configuration |
 | `completions` | Generate shell completions |
@@ -114,6 +124,7 @@ Options:
   -f, --output-file <FILE>  Output file (stdout if not specified)
   -s, --severity <LEVEL>    Minimum severity: info, warning, error, critical
   -i, --incremental         Enable incremental mode (only scan changed files)
+      --changed-only        Only scan files changed in git (for PR workflows)
   -j, --parallelism <N>     Number of parallel workers (0 = auto-detect)
   -l, --languages <LANGS>   Languages to scan (comma-separated)
       --providers <LIST>    Analysis providers (rma,pmd,oxlint) [default: rma]
@@ -132,7 +143,21 @@ Options:
   -d, --debounce <MS>       Debounce delay in milliseconds [default: 500]
   -l, --languages <LANGS>   Languages to watch
       --clear               Clear screen on each change
+      --no-initial-scan     Skip initial directory scan (only show changes)
+      --errors-only         Only show errors, not warnings
+  -q, --quiet               Suppress non-essential output
 ```
+
+**Interactive Keyboard Shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `q` / `c` | Quit watch mode |
+| `r` | Force re-scan of all files |
+| `s` | Show current statistics |
+| `e` | Toggle errors-only mode |
+| `p` | Pause/resume watching |
+| `?` | Show help |
 
 ## Output Formats
 
@@ -318,6 +343,8 @@ rust-monorepo-analyzer/
 - `generic/long-function` - Detects functions over 100 lines
 - `generic/high-complexity` - Detects high cyclomatic complexity
 - `generic/hardcoded-secret` - Detects API keys and passwords
+- `generic/duplicate-function` - Detects copy-pasted functions (10+ lines)
+- `generic/insecure-crypto` - Detects MD5, SHA-1, DES, RC4, ECB usage
 
 ## HTTP API (Daemon Mode)
 
@@ -337,6 +364,7 @@ rma daemon --host 127.0.0.1 --port 9876
 | GET | `/api/v1/search` | Search indexed files |
 | GET | `/api/v1/stats` | Get daemon statistics |
 | POST | `/api/v1/index` | Trigger re-indexing |
+| WS | `/ws/watch` | WebSocket for real-time updates |
 
 ### Example Request
 
@@ -345,6 +373,79 @@ curl -X POST http://localhost:9876/api/v1/scan \
   -H "Content-Type: application/json" \
   -d '{"path": "/path/to/repo", "languages": ["rust", "python"]}'
 ```
+
+### WebSocket Real-time Updates
+
+Connect to `/ws/watch` for real-time file change notifications and analysis results:
+
+```javascript
+const ws = new WebSocket('ws://localhost:9876/ws/watch');
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  switch (msg.type) {
+    case 'FileChanged':
+      console.log(`File changed: ${msg.data.path}`);
+      break;
+    case 'AnalysisComplete':
+      console.log(`Analysis: ${msg.data.findings.length} findings`);
+      break;
+  }
+};
+
+// Start watching a directory
+ws.send(JSON.stringify({ command: 'Watch', data: { path: '/path/to/repo' } }));
+```
+
+## IDE Integrations
+
+RMA provides official integrations for popular editors and IDEs.
+
+### VS Code Extension
+
+```bash
+# Install from VSIX
+code --install-extension editors/vscode-rma/rma-vscode-*.vsix
+```
+
+Features:
+- Real-time diagnostics as you type
+- Problem panel integration
+- Quick fixes and code actions
+- Status bar with finding count
+
+### Neovim Plugin
+
+```lua
+-- Using lazy.nvim
+{
+  dir = "editors/neovim-rma",
+  config = function()
+    require("rma").setup({
+      daemon_url = "http://localhost:9876",
+      auto_start_daemon = true,
+    })
+  end,
+}
+```
+
+### JetBrains Plugin
+
+Install from `editors/jetbrains-rma/` - supports IntelliJ IDEA, WebStorm, PyCharm, GoLand, and CLion.
+
+### Web Dashboard
+
+For browser-based real-time monitoring:
+
+```bash
+# Start the daemon
+rma daemon
+
+# Open the dashboard
+open editors/web-dashboard/index.html
+```
+
+The web dashboard connects via WebSocket and shows live analysis results as you edit files.
 
 ## Plugin System
 
@@ -394,6 +495,29 @@ RMA uses PMD's security, error-prone, and best practices rulesets by default. Yo
 | `rma` | All | Built-in Rust-native rules (always enabled) |
 | `pmd` | Java | PMD static analysis for Java |
 | `oxlint` | JS/TS | Oxlint for JavaScript/TypeScript |
+| `gosec` | Go | Gosec for Go security analysis |
+
+### Gosec for Go
+
+[Gosec](https://github.com/securego/gosec) is the Go Security Checker that inspects Go source code for security problems.
+
+**Install Gosec:**
+```bash
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+```
+
+**Enable Gosec:**
+```bash
+# Use gosec alongside RMA's native rules
+rma scan . --providers rma,gosec
+```
+
+**Gosec Rules:**
+Gosec detects common Go security issues including:
+- G101-G110: Hardcoded credentials, bind to all interfaces
+- G201-G204: SQL injection, command injection
+- G301-G307: File permissions, file traversal
+- G401-G505: Weak crypto, insecure TLS
 
 ## Configuration
 
@@ -532,13 +656,18 @@ hyperfine 'rma scan /path/to/repo' 'semgrep --config auto /path/to/repo'
 - [x] Multi-language tree-sitter parsing
 - [x] Parallel analysis with rayon
 - [x] SARIF output for CI/CD
-- [x] Watch mode
-- [x] HTTP API daemon
+- [x] Watch mode with interactive controls
+- [x] HTTP API daemon with WebSocket support
 - [x] WASM plugin system
 - [x] AI-powered analysis
 - [x] One-command installation
 - [x] GitHub Actions integration
-- [ ] VS Code extension
+- [x] VS Code extension
+- [x] Neovim plugin
+- [x] JetBrains plugin
+- [x] Web Dashboard
+- [x] Doctor command
+- [x] Duplicate function detection
 - [ ] LSP integration
 - [ ] Cloud SaaS deployment
 

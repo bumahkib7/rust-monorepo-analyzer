@@ -8,9 +8,9 @@ pub mod config;
 pub use config::{
     AllowConfig, AllowType, Baseline, BaselineConfig, BaselineEntry, BaselineMode,
     CURRENT_CONFIG_VERSION, ConfigLoadResult, ConfigSource, ConfigWarning, EffectiveConfig,
-    Fingerprint, InlineSuppression, OxlintProviderConfig, PmdProviderConfig, Profile,
-    ProfileThresholds, ProfilesConfig, ProviderType, ProvidersConfig, RmaTomlConfig, RulesConfig,
-    RulesetsConfig, ScanConfig, SuppressionType, ThresholdOverride, WarningLevel,
+    Fingerprint, GosecProviderConfig, InlineSuppression, OxlintProviderConfig, PmdProviderConfig,
+    Profile, ProfileThresholds, ProfilesConfig, ProviderType, ProvidersConfig, RmaTomlConfig,
+    RulesConfig, RulesetsConfig, ScanConfig, SuppressionType, ThresholdOverride, WarningLevel,
     parse_inline_suppressions,
 };
 

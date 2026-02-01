@@ -7,18 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-01
+
 ### Added
-- **IDE Integrations**: VS Code extension, Neovim plugin, JetBrains plugin, Web Dashboard
-- **Real-time Watch Mode**: WebSocket-based live updates with file system monitoring
-- **Duplicate Function Detection**: `generic/duplicate-function` rule
-- **Doctor Command**: `rma doctor` for installation health checks
-- **PR Workflow Support**: `--changed-only` flag to only scan changed files
-- **Release Drafter**: Auto-generate release notes from PRs
+- **Native Oxc Integration**: JS/TS analysis using oxc crates directly (no external binaries)
+  - `oxc/no-debugger` - Detect debugger statements
+  - `oxc/no-eval` - Detect dangerous code execution
+  - `oxc/no-alert` - Detect browser dialogs
+  - `oxc/no-empty-pattern` - Detect empty destructuring
+  - `oxc/no-with` - Detect deprecated with statements
+- **Test File Exclusion**: Secret detection rules now skip test/fixture/example files
+  - Skips `/test/`, `/tests/`, `/__tests__/`, `/fixtures/`, `/examples/` directories
+  - Skips `*_test.go`, `*.test.js`, `*.spec.ts`, `conftest.py` files
+- **Gosec Provider**: Go security analysis via gosec CLI integration
+- **65 Total Rules**: Comprehensive coverage across all supported languages
 
 ### Changed
-- Watch mode now has cleaner terminal output with proper raw mode handling
-- `--no-initial-scan` flag to skip initial directory scan in watch mode
-- Daemon shows dashboard URL on startup
+- **js/no-cond-assign**: Now only flags actual control flow statements (if/while/for/do)
+  - Fixes false positives on ternaries in JSX template literals
+  - Skips intentional patterns like `if ((x = getValue()) !== null)`
+- **Go Security Scanner**: Single-pass AST traversal for maximum performance
+  - Pre-compiled regex patterns with LazyLock
+  - Quick content checks to skip unnecessary scanning
+
+### Fixed
+- False positive: Private keys in test files no longer flagged
+- False positive: Ternary expressions in JSX className props
+- Performance: Rule pre-filtering with HashMap for O(1) lookup
+- Performance: HashSet for O(1) node kind lookups
 
 ## [0.6.0] - 2026-02-01
 

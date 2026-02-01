@@ -9,6 +9,15 @@ use rma_common::{Confidence, Finding, Language, Severity};
 use rma_parser::ParsedFile;
 use tree_sitter::Node;
 
+/// Case-insensitive substring search without allocation
+#[inline]
+fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 // =============================================================================
 // SECTION A: HIGH-CONFIDENCE SINKS
 // =============================================================================
@@ -157,11 +166,11 @@ impl Rule for SqlInjectionRule {
                 if (text.contains("executeQuery") || text.contains("executeUpdate"))
                     && (text.contains(" + ") || text.contains("\" +"))
                 {
-                    let lower = text.to_lowercase();
-                    if lower.contains("select ")
-                        || lower.contains("insert ")
-                        || lower.contains("update ")
-                        || lower.contains("delete ")
+                    // Use case-insensitive search without allocation
+                    if contains_ignore_case(text, "select ")
+                        || contains_ignore_case(text, "insert ")
+                        || contains_ignore_case(text, "update ")
+                        || contains_ignore_case(text, "delete ")
                     {
                         findings.push(create_finding_with_confidence(
                             self.id(),

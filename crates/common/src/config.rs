@@ -293,6 +293,8 @@ pub enum ProviderType {
     Oxlint,
     /// RustSec for Rust dependency vulnerabilities (optional)
     RustSec,
+    /// Gosec for Go security analysis (optional)
+    Gosec,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -302,6 +304,7 @@ impl std::fmt::Display for ProviderType {
             ProviderType::Pmd => write!(f, "pmd"),
             ProviderType::Oxlint => write!(f, "oxlint"),
             ProviderType::RustSec => write!(f, "rustsec"),
+            ProviderType::Gosec => write!(f, "gosec"),
         }
     }
 }
@@ -315,8 +318,9 @@ impl std::str::FromStr for ProviderType {
             "pmd" => Ok(ProviderType::Pmd),
             "oxlint" => Ok(ProviderType::Oxlint),
             "rustsec" => Ok(ProviderType::RustSec),
+            "gosec" => Ok(ProviderType::Gosec),
             _ => Err(format!(
-                "Unknown provider: {}. Available: rma, pmd, oxlint",
+                "Unknown provider: {}. Available: rma, pmd, oxlint, gosec",
                 s
             )),
         }
@@ -337,6 +341,10 @@ pub struct ProvidersConfig {
     /// Oxlint provider configuration
     #[serde(default)]
     pub oxlint: OxlintProviderConfig,
+
+    /// Gosec provider configuration
+    #[serde(default)]
+    pub gosec: GosecProviderConfig,
 }
 
 impl Default for ProvidersConfig {
@@ -345,6 +353,7 @@ impl Default for ProvidersConfig {
             enabled: default_enabled_providers(),
             pmd: PmdProviderConfig::default(),
             oxlint: OxlintProviderConfig::default(),
+            gosec: GosecProviderConfig::default(),
         }
     }
 }
@@ -499,6 +508,51 @@ impl Default for OxlintProviderConfig {
 }
 
 fn default_oxlint_timeout() -> u64 {
+    300_000 // 5 minutes
+}
+
+/// Gosec provider configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GosecProviderConfig {
+    /// Whether Gosec provider is configured
+    #[serde(default)]
+    pub configured: bool,
+
+    /// Path to gosec binary (default: search PATH)
+    #[serde(default)]
+    pub binary_path: String,
+
+    /// Timeout for gosec execution in milliseconds
+    #[serde(default = "default_gosec_timeout")]
+    pub timeout_ms: u64,
+
+    /// Gosec rules to exclude (e.g., ["G104", "G304"])
+    #[serde(default)]
+    pub exclude_rules: Vec<String>,
+
+    /// Gosec rules to include only (if set, only these rules run)
+    #[serde(default)]
+    pub include_rules: Vec<String>,
+
+    /// Additional gosec command-line arguments
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+}
+
+impl Default for GosecProviderConfig {
+    fn default() -> Self {
+        Self {
+            configured: false,
+            binary_path: String::new(),
+            timeout_ms: default_gosec_timeout(),
+            exclude_rules: Vec::new(),
+            include_rules: Vec::new(),
+            extra_args: Vec::new(),
+        }
+    }
+}
+
+fn default_gosec_timeout() -> u64 {
     300_000 // 5 minutes
 }
 

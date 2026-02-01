@@ -4,6 +4,7 @@
 //! to identify potential security vulnerabilities. It does NOT execute any code.
 
 use crate::rules::{Rule, create_finding};
+use crate::security::generic::is_test_or_fixture_file;
 use rma_common::{Finding, Language, Severity};
 use rma_parser::ParsedFile;
 use tree_sitter::Node;
@@ -114,6 +115,11 @@ impl Rule for HardcodedSecretRule {
     }
 
     fn check(&self, parsed: &ParsedFile) -> Vec<Finding> {
+        // Skip test/fixture files - they commonly contain fake secrets
+        if is_test_or_fixture_file(&parsed.path) {
+            return Vec::new();
+        }
+
         let mut findings = Vec::new();
         let mut cursor = parsed.tree.walk();
 
