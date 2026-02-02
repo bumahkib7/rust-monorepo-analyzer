@@ -1,8 +1,11 @@
 //! Scan command implementation
 
-use crate::output;
+use crate::filter::{self, CategoryFilter, FilterStats, FindingFilter};
+use crate::output::{self, OutputOptions};
+use crate::progress::{ScanProgress, ScanProgressConfig};
+use crate::tui;
 use crate::ui::{progress, theme::Theme};
-use crate::{OutputFormat, ScanMode};
+use crate::{GroupBy, OutputFormat, ScanMode};
 use anyhow::Result;
 use colored::Colorize;
 use rma_analyzer::{AnalyzerEngine, diff, project::ProjectAnalyzer};
@@ -56,6 +59,58 @@ pub struct ScanArgs {
     pub skip_tests: bool,
     /// Skip ALL findings in tests including security rules
     pub skip_tests_all: bool,
+    /// Maximum findings to display
+    pub limit: usize,
+    /// Show all findings without limit
+    pub show_all: bool,
+    /// How to group findings
+    pub group_by: GroupBy,
+    /// Collapse repeated findings
+    pub collapse: bool,
+    /// Expand collapsed findings (show all locations)
+    pub expand: bool,
+    /// Launch interactive TUI viewer
+    pub interactive: bool,
+    /// Stream findings as they're discovered (real-time output)
+    pub stream: bool,
+    /// Hide progress bar (auto-disabled for non-TTY)
+    pub no_progress: bool,
+
+    // =========================================================================
+    // Filtering options
+    // =========================================================================
+    /// Filter by specific rule IDs (supports glob patterns)
+    pub rules: Vec<String>,
+    /// Exclude specific rule IDs
+    pub exclude_rules: Vec<String>,
+    /// Filter to specific files (glob patterns)
+    pub files: Vec<String>,
+    /// Exclude files matching patterns
+    pub exclude_files: Vec<String>,
+    /// Filter by category
+    pub category: Option<CategoryFilter>,
+    /// Only show fixable findings
+    pub fixable: bool,
+    /// Only show high-confidence findings
+    pub high_confidence: bool,
+    /// Search findings by message content
+    pub search: Option<String>,
+    /// Search with regex pattern
+    pub search_regex: Option<String>,
+
+    // =========================================================================
+    // Smart presets
+    // =========================================================================
+    /// Use security-focused preset
+    pub preset_security: bool,
+    /// Use CI preset
+    pub preset_ci: bool,
+    /// Use review preset
+    pub preset_review: bool,
+    /// Load filter profile from config
+    pub filter_profile: Option<String>,
+    /// Show filter explanation
+    pub explain: bool,
 }
 
 /// Effective scan settings after applying mode defaults
@@ -297,6 +352,20 @@ pub fn run(args: ScanArgs) -> Result<()> {
         }
     }
 
+    // Phase 2.9: Apply user-specified filters
+    let filter_stats = apply_user_filters(
+        &args,
+        &effective,
+        &mut results,
+        &mut summary,
+        toml_config.as_ref().map(|(p, _)| p.as_path()),
+    )?;
+
+    // Show filter summary if filters are active
+    if !args.quiet && effective.format == OutputFormat::Text && filter_stats.has_filtered() {
+        print_filter_summary(&args, &filter_stats);
+    }
+
     // Phase 3: AI Analysis (optional)
     if args.ai_analysis {
         let ai_start = Instant::now();
@@ -316,14 +385,33 @@ pub fn run(args: ScanArgs) -> Result<()> {
         print_timings(&timings, total_duration);
     }
 
+    // Launch interactive TUI if requested
+    if args.interactive {
+        return tui::run_from_analysis(&results, &summary);
+    }
+
+    // Build output options
+    let output_options = OutputOptions {
+        limit: if args.show_all {
+            usize::MAX
+        } else {
+            args.limit
+        },
+        group_by: args.group_by,
+        collapse: args.collapse,
+        expand: args.expand,
+        quiet: args.quiet,
+    };
+
     // Output results
-    output::format_results_with_root(
+    output::format_results_with_options(
         &results,
         &summary,
         total_duration,
         effective.format,
         args.output.clone(),
         Some(&args.path),
+        &output_options,
     )?;
 
     // Exit with error code if critical/error findings
@@ -643,7 +731,23 @@ fn run_analyze_phase(
     Vec<rma_analyzer::FileAnalysis>,
     rma_analyzer::AnalysisSummary,
 )> {
-    let spinner = if !args.quiet && effective.format == OutputFormat::Text {
+    // Create progress config based on CLI args
+    let progress_config = ScanProgressConfig::from_args(args.no_progress, args.stream, args.quiet);
+
+    // Use enhanced progress tracking if streaming is enabled
+    if progress_config.stream_findings {
+        return run_analyze_phase_streaming(
+            args,
+            effective,
+            config,
+            parsed_files,
+            toml_config,
+            progress_config,
+        );
+    }
+
+    // Standard progress with spinner
+    let spinner = if !args.quiet && effective.format == OutputFormat::Text && !args.no_progress {
         let s = progress::create_spinner("Analyzing code...");
         Some(s)
     } else {
@@ -690,6 +794,66 @@ fn run_analyze_phase(
     }
 
     Ok(result)
+}
+
+/// Run analyze phase with streaming output - prints findings as they are discovered
+fn run_analyze_phase_streaming(
+    args: &ScanArgs,
+    _effective: &EffectiveScanSettings,
+    config: &RmaConfig,
+    parsed_files: &[rma_parser::ParsedFile],
+    toml_config: Option<&RmaTomlConfig>,
+    progress_config: ScanProgressConfig,
+) -> Result<(
+    Vec<rma_analyzer::FileAnalysis>,
+    rma_analyzer::AnalysisSummary,
+)> {
+    // Create scan progress tracker
+    let scan_progress = ScanProgress::new(parsed_files.len() as u64, progress_config);
+
+    // Build providers config from CLI args and TOML config
+    let providers_config = build_providers_config(
+        &args.providers,
+        toml_config,
+        args.osv_offline,
+        &args.osv_cache_ttl,
+    );
+
+    let analyzer = AnalyzerEngine::with_providers(config.clone(), providers_config);
+
+    // Process files one by one for streaming
+    let mut all_results: Vec<rma_analyzer::FileAnalysis> = Vec::with_capacity(parsed_files.len());
+    let mut summary = rma_analyzer::AnalysisSummary::default();
+
+    for parsed_file in parsed_files {
+        scan_progress.set_current_file(&parsed_file.path);
+        scan_progress.track_language(parsed_file.language);
+
+        // Analyze single file
+        let file_results = analyzer.analyze_file(parsed_file)?;
+
+        // Stream findings as they're discovered
+        for finding in &file_results.findings {
+            scan_progress.add_finding(finding);
+
+            // Update summary counts
+            summary.total_findings += 1;
+            match finding.severity {
+                Severity::Critical => summary.critical_count += 1,
+                Severity::Error => summary.error_count += 1,
+                Severity::Warning => summary.warning_count += 1,
+                Severity::Info => summary.info_count += 1,
+            }
+        }
+
+        all_results.push(file_results);
+        scan_progress.inc_file();
+    }
+
+    summary.files_analyzed = all_results.len();
+    scan_progress.finish();
+
+    Ok((all_results, summary))
 }
 
 fn run_cross_file_phase(
@@ -1013,6 +1177,283 @@ fn filter_baseline_findings(
     }
 }
 
+/// Build and apply user-specified filters to findings
+fn apply_user_filters(
+    args: &ScanArgs,
+    _effective: &EffectiveScanSettings,
+    results: &mut Vec<rma_analyzer::FileAnalysis>,
+    summary: &mut rma_analyzer::AnalysisSummary,
+    config_path: Option<&std::path::Path>,
+) -> Result<FilterStats> {
+    // Build the filter based on CLI args and presets
+    let mut filter = build_finding_filter(args, config_path)?;
+
+    // Check if any filters are active
+    if !filter.is_active() {
+        return Ok(FilterStats::default());
+    }
+
+    // Collect all findings for filtering
+    let _total_before: usize = results.iter().map(|r| r.findings.len()).sum();
+
+    // Apply filter with statistics tracking if explain mode is enabled
+    let all_findings: Vec<rma_common::Finding> = results
+        .iter_mut()
+        .flat_map(|r| std::mem::take(&mut r.findings))
+        .collect();
+
+    let (filtered_findings, stats) = filter.apply_with_stats(all_findings);
+
+    // Redistribute filtered findings back to their files
+    let mut findings_by_file: std::collections::HashMap<String, Vec<rma_common::Finding>> =
+        std::collections::HashMap::new();
+
+    for finding in filtered_findings {
+        let file_path = finding.location.file.to_string_lossy().to_string();
+        findings_by_file.entry(file_path).or_default().push(finding);
+    }
+
+    for result in results.iter_mut() {
+        if let Some(findings) = findings_by_file.remove(&result.path) {
+            result.findings = findings;
+        }
+    }
+
+    // Recalculate summary
+    summary.total_findings = 0;
+    summary.critical_count = 0;
+    summary.error_count = 0;
+    summary.warning_count = 0;
+    summary.info_count = 0;
+
+    for result in results.iter() {
+        for finding in &result.findings {
+            summary.total_findings += 1;
+            match finding.severity {
+                Severity::Critical => summary.critical_count += 1,
+                Severity::Error => summary.error_count += 1,
+                Severity::Warning => summary.warning_count += 1,
+                Severity::Info => summary.info_count += 1,
+            }
+        }
+    }
+
+    Ok(stats)
+}
+
+/// Build a FindingFilter from CLI arguments
+fn build_finding_filter(
+    args: &ScanArgs,
+    config_path: Option<&std::path::Path>,
+) -> Result<FindingFilter> {
+    // Start with a preset if specified
+    let mut filter = if args.preset_security {
+        FindingFilter::preset_security()
+    } else if args.preset_ci {
+        FindingFilter::preset_ci()
+    } else if args.preset_review {
+        FindingFilter::preset_review()
+    } else if let Some(ref profile_name) = args.filter_profile {
+        // Load profile from config
+        if let Some(path) = config_path {
+            let profiles = filter::load_profiles_from_config(path)?;
+            if let Some(profile) = profiles.get(profile_name) {
+                FindingFilter::from_profile(profile)?
+            } else {
+                anyhow::bail!("Filter profile '{}' not found in config", profile_name);
+            }
+        } else {
+            anyhow::bail!("No config file found for filter profile '{}'", profile_name);
+        }
+    } else {
+        FindingFilter::new()
+    };
+
+    // Apply CLI overrides
+    if !args.rules.is_empty() {
+        filter = filter.with_rules(args.rules.clone());
+    }
+
+    if !args.exclude_rules.is_empty() {
+        filter = filter.with_exclude_rules(args.exclude_rules.clone());
+    }
+
+    if !args.files.is_empty() {
+        filter = filter.with_files(args.files.clone());
+    }
+
+    if !args.exclude_files.is_empty() {
+        filter = filter.with_exclude_files(args.exclude_files.clone());
+    }
+
+    if let Some(cat) = args.category {
+        filter = filter.with_category(cat.into());
+    }
+
+    if args.fixable {
+        filter = filter.with_fixable_only(true);
+    }
+
+    if args.high_confidence {
+        filter = filter.with_high_confidence_only(true);
+    }
+
+    if let Some(ref text) = args.search {
+        filter = filter.with_search(text.clone());
+    }
+
+    if let Some(ref pattern) = args.search_regex {
+        filter = filter.with_search_regex(pattern)?;
+    }
+
+    // Enable stats tracking if explain mode is on
+    if args.explain {
+        filter = filter.with_stats();
+    }
+
+    Ok(filter)
+}
+
+/// Print filter summary and statistics
+fn print_filter_summary(args: &ScanArgs, stats: &FilterStats) {
+    // Build filter for summary display
+    let filter = build_finding_filter(args, None).unwrap_or_default();
+
+    println!();
+    println!("{}", "Filters active:".cyan().bold());
+
+    for (key, value) in filter.summary() {
+        println!(
+            "  {} {}: {}",
+            "\u{2022}".dimmed(),
+            key.dimmed(),
+            value.bright_white()
+        );
+    }
+
+    println!();
+    println!(
+        "Found {} matching findings (filtered from {} total)",
+        stats.total_after.to_string().green().bold(),
+        stats.total_before.to_string().dimmed()
+    );
+
+    // Show explain details if requested
+    if args.explain && stats.filtered_count() > 0 {
+        println!();
+        println!("{}", "Filtered out findings:".yellow().bold());
+
+        if stats.by_severity > 0 {
+            let breakdown: Vec<String> = stats
+                .severity_breakdown
+                .iter()
+                .map(|(sev, count)| format!("{} {}", count, sev))
+                .collect();
+            println!(
+                "  {} {} below severity threshold ({})",
+                "\u{2022}".dimmed(),
+                stats.by_severity.to_string().yellow(),
+                breakdown.join(", ").dimmed()
+            );
+        }
+
+        if stats.by_rules_exclude > 0 {
+            let breakdown: Vec<String> = stats
+                .excluded_rules_breakdown
+                .iter()
+                .take(5)
+                .map(|(rule, count)| format!("{}: {}", rule, count))
+                .collect();
+            let suffix = if stats.excluded_rules_breakdown.len() > 5 {
+                format!(" (+{} more)", stats.excluded_rules_breakdown.len() - 5)
+            } else {
+                String::new()
+            };
+            println!(
+                "  {} {} from excluded rules ({}{})",
+                "\u{2022}".dimmed(),
+                stats.by_rules_exclude.to_string().yellow(),
+                breakdown.join(", ").dimmed(),
+                suffix.dimmed()
+            );
+        }
+
+        if stats.by_rules_include > 0 {
+            println!(
+                "  {} {} not matching included rules",
+                "\u{2022}".dimmed(),
+                stats.by_rules_include.to_string().yellow()
+            );
+        }
+
+        if stats.by_files_exclude > 0 {
+            let breakdown: Vec<String> = stats
+                .excluded_files_breakdown
+                .iter()
+                .take(3)
+                .map(|(pattern, count)| format!("{}: {}", pattern, count))
+                .collect();
+            let suffix = if stats.excluded_files_breakdown.len() > 3 {
+                format!(
+                    " (+{} more patterns)",
+                    stats.excluded_files_breakdown.len() - 3
+                )
+            } else {
+                String::new()
+            };
+            println!(
+                "  {} {} from excluded files ({}{})",
+                "\u{2022}".dimmed(),
+                stats.by_files_exclude.to_string().yellow(),
+                breakdown.join(", ").dimmed(),
+                suffix.dimmed()
+            );
+        }
+
+        if stats.by_files_include > 0 {
+            println!(
+                "  {} {} not matching included files",
+                "\u{2022}".dimmed(),
+                stats.by_files_include.to_string().yellow()
+            );
+        }
+
+        if stats.by_category > 0 {
+            println!(
+                "  {} {} from other categories",
+                "\u{2022}".dimmed(),
+                stats.by_category.to_string().yellow()
+            );
+        }
+
+        if stats.by_fixable > 0 {
+            println!(
+                "  {} {} without available fixes",
+                "\u{2022}".dimmed(),
+                stats.by_fixable.to_string().yellow()
+            );
+        }
+
+        if stats.by_confidence > 0 {
+            println!(
+                "  {} {} with low/medium confidence",
+                "\u{2022}".dimmed(),
+                stats.by_confidence.to_string().yellow()
+            );
+        }
+
+        if stats.by_search > 0 {
+            println!(
+                "  {} {} not matching search pattern",
+                "\u{2022}".dimmed(),
+                stats.by_search.to_string().yellow()
+            );
+        }
+    }
+
+    println!();
+}
+
 /// Get list of files changed since a base git ref
 fn get_changed_files(repo_path: &PathBuf, base_ref: &str) -> Result<Vec<String>> {
     use std::process::Command;
@@ -1118,6 +1559,30 @@ mod tests {
             diff_stdin: false,
             skip_tests: false,
             skip_tests_all: false,
+            limit: 20,
+            show_all: false,
+            group_by: GroupBy::File,
+            collapse: false,
+            expand: false,
+            interactive: false,
+            stream: false,
+            no_progress: false,
+            // Filtering options
+            rules: Vec::new(),
+            exclude_rules: Vec::new(),
+            files: Vec::new(),
+            exclude_files: Vec::new(),
+            category: None,
+            fixable: false,
+            high_confidence: false,
+            search: None,
+            search_regex: None,
+            // Presets
+            preset_security: false,
+            preset_ci: false,
+            preset_review: false,
+            filter_profile: None,
+            explain: false,
         }
     }
 

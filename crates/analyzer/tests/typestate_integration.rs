@@ -2,13 +2,13 @@
 //!
 //! Tests end-to-end flow: parse file -> analyze -> get typestate violations
 
-use rma_analyzer::security::typestate_rules::{
-    builtin_typestate_rules, CryptoTypestateRule, DatabaseTypestateRule, FileTypestateRule,
-    IteratorTypestateRule, LockTypestateRule,
-};
-use rma_analyzer::rules::Rule;
-use rma_analyzer::flow::FlowContext;
 use rma_analyzer::AnalyzerEngine;
+use rma_analyzer::flow::FlowContext;
+use rma_analyzer::rules::Rule;
+use rma_analyzer::security::typestate_rules::{
+    CryptoTypestateRule, DatabaseTypestateRule, FileTypestateRule, IteratorTypestateRule,
+    LockTypestateRule, builtin_typestate_rules,
+};
 use rma_common::{Language, RmaConfig};
 use rma_parser::ParserEngine;
 use std::path::Path;
@@ -107,7 +107,10 @@ fn test_file_rule_applies_to_js() {
 #[test]
 fn test_file_rule_uses_flow() {
     let rule = FileTypestateRule;
-    assert!(rule.uses_flow(), "FileTypestateRule should use flow analysis");
+    assert!(
+        rule.uses_flow(),
+        "FileTypestateRule should use flow analysis"
+    );
 }
 
 #[test]
@@ -146,7 +149,10 @@ fn test_lock_rule_applies_to_go() {
 #[test]
 fn test_lock_rule_uses_flow() {
     let rule = LockTypestateRule;
-    assert!(rule.uses_flow(), "LockTypestateRule should use flow analysis");
+    assert!(
+        rule.uses_flow(),
+        "LockTypestateRule should use flow analysis"
+    );
 }
 
 #[test]
@@ -188,7 +194,10 @@ fn test_crypto_rule_applies_to_java() {
 #[test]
 fn test_crypto_rule_uses_flow() {
     let rule = CryptoTypestateRule;
-    assert!(rule.uses_flow(), "CryptoTypestateRule should use flow analysis");
+    assert!(
+        rule.uses_flow(),
+        "CryptoTypestateRule should use flow analysis"
+    );
 }
 
 #[test]
@@ -229,7 +238,10 @@ fn test_database_rule_applies_to_python() {
 #[test]
 fn test_database_rule_uses_flow() {
     let rule = DatabaseTypestateRule;
-    assert!(rule.uses_flow(), "DatabaseTypestateRule should use flow analysis");
+    assert!(
+        rule.uses_flow(),
+        "DatabaseTypestateRule should use flow analysis"
+    );
 }
 
 #[test]
@@ -271,7 +283,10 @@ fn test_iterator_rule_applies_to_rust() {
 #[test]
 fn test_iterator_rule_uses_flow() {
     let rule = IteratorTypestateRule;
-    assert!(rule.uses_flow(), "IteratorTypestateRule should use flow analysis");
+    assert!(
+        rule.uses_flow(),
+        "IteratorTypestateRule should use flow analysis"
+    );
 }
 
 // =============================================================================

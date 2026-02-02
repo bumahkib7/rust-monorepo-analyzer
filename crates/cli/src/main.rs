@@ -3,7 +3,10 @@
 //! A sophisticated, intelligent, color-coded CLI for code analysis and security scanning.
 
 mod commands;
+mod filter;
 mod output;
+mod progress;
+mod tui;
 mod ui;
 
 use anyhow::Result;
@@ -56,6 +59,18 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Scan a repository for security issues and code metrics
+    ///
+    /// Filtering examples:
+    ///   rma scan --severity error                    # Only errors and critical
+    ///   rma scan --rules "sql-*,xss-*"               # Only SQL/XSS rules
+    ///   rma scan --exclude-rules "style/*"           # Exclude style rules
+    ///   rma scan --files "src/**/*.rs"               # Only Rust files in src/
+    ///   rma scan --category security --high-confidence
+    ///   rma scan --search "injection"                # Search in messages
+    ///   rma scan --preset-security                   # Security-focused preset
+    ///   rma scan --preset-ci                         # CI-optimized preset
+    ///   rma scan --filter-profile security           # Use saved profile
+    ///   rma scan --explain                           # Show filter breakdown
     #[command(visible_alias = "s")]
     Scan {
         /// Path to the repository to scan
@@ -175,6 +190,100 @@ pub enum Commands {
         /// Use with caution - security vulnerabilities in tests can still be exploited
         #[arg(long)]
         skip_tests_all: bool,
+
+        /// Maximum findings to display (default: 20, use --all for unlimited)
+        #[arg(long, default_value = "20")]
+        limit: usize,
+
+        /// Show all findings without limit
+        #[arg(long, conflicts_with = "limit")]
+        all: bool,
+
+        /// Group findings by file/rule/severity/none
+        #[arg(long, value_enum, default_value = "file")]
+        group_by: GroupBy,
+
+        /// Collapse repeated findings (show count instead)
+        #[arg(long)]
+        collapse: bool,
+
+        /// Expand collapsed findings (show all locations)
+        #[arg(long, conflicts_with = "collapse")]
+        expand: bool,
+
+        // =====================================================================
+        // Filtering options
+        // =====================================================================
+        /// Filter by specific rule IDs (comma-separated, supports glob patterns like "security/*")
+        #[arg(long, value_delimiter = ',')]
+        rules: Vec<String>,
+
+        /// Exclude specific rule IDs (comma-separated, supports glob patterns)
+        #[arg(long, value_delimiter = ',')]
+        exclude_rules: Vec<String>,
+
+        /// Filter to specific files (glob patterns, comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        files: Vec<String>,
+
+        /// Exclude files matching patterns (glob patterns, comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        exclude_files: Vec<String>,
+
+        /// Filter by category (security, quality, performance, style)
+        #[arg(long, value_enum)]
+        category: Option<filter::CategoryFilter>,
+
+        /// Only show findings with fixes available
+        #[arg(long)]
+        fixable: bool,
+
+        /// Only show high-confidence findings
+        #[arg(long)]
+        high_confidence: bool,
+
+        /// Search findings by message content (case-insensitive)
+        #[arg(long)]
+        search: Option<String>,
+
+        /// Search with regex pattern
+        #[arg(long, conflicts_with = "search")]
+        search_regex: Option<String>,
+
+        // =====================================================================
+        // Smart presets
+        // =====================================================================
+        /// Use security-focused preset (security rules, high confidence, warning+)
+        #[arg(long, conflicts_with_all = ["preset_ci", "preset_review"])]
+        preset_security: bool,
+
+        /// Use CI preset (errors only, compact output)
+        #[arg(long, conflicts_with_all = ["preset_security", "preset_review"])]
+        preset_ci: bool,
+
+        /// Use review preset (warnings+, grouped by file)
+        #[arg(long, conflicts_with_all = ["preset_security", "preset_ci"])]
+        preset_review: bool,
+
+        /// Load filter profile from config file
+        #[arg(long)]
+        filter_profile: Option<String>,
+
+        /// Show why findings were filtered (detailed breakdown)
+        #[arg(long)]
+        explain: bool,
+
+        /// Stream findings as they're discovered (real-time output)
+        #[arg(long)]
+        stream: bool,
+
+        /// Hide progress bar (for CI/scripts, auto-disabled for non-TTY)
+        #[arg(long)]
+        no_progress: bool,
+
+        /// Launch interactive TUI viewer for browsing findings
+        #[arg(short = 'I', long)]
+        interactive: bool,
     },
 
     /// Watch for file changes and re-analyze in real-time
@@ -736,6 +845,20 @@ pub enum ScanMode {
     Pr,
 }
 
+/// How to group findings in output
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Default)]
+pub enum GroupBy {
+    /// Group findings by file (default)
+    #[default]
+    File,
+    /// Group findings by rule ID
+    Rule,
+    /// Group findings by severity level
+    Severity,
+    /// No grouping, flat list
+    None,
+}
+
 impl From<SeverityArg> for rma_common::Severity {
     fn from(arg: SeverityArg) -> Self {
         match arg {
@@ -808,6 +931,28 @@ fn main() -> Result<()> {
             diff_stdin,
             skip_tests,
             skip_tests_all,
+            limit,
+            all,
+            group_by,
+            collapse,
+            expand,
+            rules,
+            exclude_rules,
+            files,
+            exclude_files,
+            category,
+            fixable,
+            high_confidence,
+            search,
+            search_regex,
+            preset_security,
+            preset_ci,
+            preset_review,
+            filter_profile,
+            explain,
+            stream,
+            no_progress,
+            interactive,
         } => commands::scan::run(commands::scan::ScanArgs {
             path,
             format,
@@ -838,6 +983,28 @@ fn main() -> Result<()> {
             diff_stdin,
             skip_tests,
             skip_tests_all,
+            limit,
+            show_all: all,
+            group_by,
+            collapse,
+            expand,
+            rules,
+            exclude_rules,
+            files,
+            exclude_files,
+            category,
+            fixable,
+            high_confidence,
+            search,
+            search_regex,
+            preset_security,
+            preset_ci,
+            preset_review,
+            filter_profile,
+            explain,
+            stream,
+            no_progress,
+            interactive,
         }),
 
         Commands::Watch {
