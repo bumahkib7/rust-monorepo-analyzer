@@ -157,12 +157,12 @@ pub fn output(results: &[FileAnalysis], output_file: Option<PathBuf>) -> Result<
                             }]
                         }]);
                     } else if let Some(suggestion) = &f.suggestion {
-                        // Fall back to simple description-only fix for backward compatibility
-                        result["fixes"] = serde_json::json!([{
-                            "description": {
-                                "text": suggestion
-                            }
-                        }]);
+                        // SARIF spec requires artifactChanges for fixes
+                        // Append suggestion to the message instead
+                        if let Some(text) = result["message"]["text"].as_str() {
+                            result["message"]["text"] =
+                                serde_json::json!(format!("{}\n\nSuggestion: {}", text, suggestion));
+                        }
                     }
 
                     // Add properties with additional metadata
