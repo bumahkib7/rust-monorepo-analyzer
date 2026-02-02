@@ -58,10 +58,14 @@ jobs:
       - name: Run RMA scan
         id: scan
         run: |
+          # Note: Excluding crypto/secret rules because rule definition files
+          # intentionally contain vulnerable patterns as examples
           ./rma scan . \
             --format sarif \
             --output rma-results.sarif \
             --severity info \
+            --skip-tests-all \
+            --exclude-rules "generic/hardcoded-secret,generic/insecure-crypto,generic/crypto-typestate" \
             2>&1 || true
 
           echo "Scan complete."

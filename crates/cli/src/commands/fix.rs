@@ -1949,6 +1949,7 @@ fn apply_fixes(plan: &FixPlan, args: &FixArgs) -> Result<FixResult> {
                     let cmd = "npm install --package-lock-only";
                     result.commands_executed.push(cmd.to_string());
 
+                    // rma-ignore rust/command-injection reason="static hardcoded command, not user input"
                     let output = Command::new("sh")
                         .arg("-c")
                         .arg(cmd)
