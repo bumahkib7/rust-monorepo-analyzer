@@ -56,20 +56,38 @@ pub use resource_leak::ResourceLeakRule;
 
 // Re-export typestate rules
 pub use typestate_rules::{
-    // File typestate
-    FileTypestateRule, FileState, FileOperation, ViolationType, FileStateMachine,
-    // Lock typestate
-    LockTypestateRule, LockState, LockOperation, LockStateMachine,
+    CryptoObjectType,
+    CryptoState,
+    CryptoStateMachine,
     // Crypto typestate
-    CryptoTypestateRule, CryptoState, CryptoStateMachine, CryptoObjectType, CryptoViolationType,
+    CryptoTypestateRule,
+    CryptoViolationType,
+    DatabaseAction,
+    DatabaseState,
+    DatabaseStateMachine,
     // Database typestate
-    DatabaseTypestateRule, DatabaseState, DatabaseAction, DatabaseViolation, DatabaseStateMachine,
+    DatabaseTypestateRule,
+    DatabaseViolation,
+    FileOperation,
+    FileState,
+    FileStateMachine,
+    // File typestate
+    FileTypestateRule,
+    IteratorOperation,
+    IteratorState,
+    IteratorStateMachine,
     // Iterator typestate
-    IteratorTypestateRule, IteratorState, IteratorOperation, IteratorStateMachine,
-    // Convenience function
-    builtin_typestate_rules,
+    IteratorTypestateRule,
+    LockOperation,
+    LockState,
+    LockStateMachine,
+    // Lock typestate
+    LockTypestateRule,
     // Analyzer (from typestate_rules module)
     TypestateAnalyzer,
+    ViolationType,
+    // Convenience function
+    builtin_typestate_rules,
 };
 
 // Re-export XSS detection rule

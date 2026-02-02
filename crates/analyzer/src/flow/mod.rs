@@ -41,10 +41,10 @@ pub use type_inference::{
     analyze_types, compute_nullability_refinements, infer_types_from_symbols,
 };
 pub use typestate::{
-    State, StateMachine, TrackedState, Transition, TransitionTrigger, TypestateAnalyzer,
-    TypestateResult, TypestateViolation, ViolationKind, analyze_typestate_with_context,
-    connection_state_machine, file_state_machine, find_assignments_to_var, find_method_calls_on_var,
-    iterator_state_machine, lock_state_machine, MethodCallInfo,
+    MethodCallInfo, State, StateMachine, TrackedState, Transition, TransitionTrigger,
+    TypestateAnalyzer, TypestateResult, TypestateViolation, ViolationKind,
+    analyze_typestate_with_context, connection_state_machine, file_state_machine,
+    find_assignments_to_var, find_method_calls_on_var, iterator_state_machine, lock_state_machine,
 };
 
 use crate::callgraph::CallGraph;
@@ -828,12 +828,7 @@ impl FlowContext {
     pub fn all_typestate_violations(&self) -> Vec<&TypestateViolation> {
         self.typestate_results
             .as_ref()
-            .map(|results| {
-                results
-                    .iter()
-                    .flat_map(|r| r.violations.iter())
-                    .collect()
-            })
+            .map(|results| results.iter().flat_map(|r| r.violations.iter()).collect())
             .unwrap_or_default()
     }
 }

@@ -264,7 +264,11 @@ impl StateMachine {
     }
 
     /// Get any transition that matches the trigger from a given state
-    pub fn get_transition(&self, from_state: &str, trigger: &TransitionTrigger) -> Option<&Transition> {
+    pub fn get_transition(
+        &self,
+        from_state: &str,
+        trigger: &TransitionTrigger,
+    ) -> Option<&Transition> {
         self.transitions
             .iter()
             .find(|t| t.from == from_state && &t.trigger == trigger)
@@ -653,7 +657,10 @@ impl TypestateAnalyzer {
     }
 
     /// Find variables that should be tracked by state machines
-    fn find_tracked_variables<'a>(&'a self, parsed: &ParsedFile) -> Vec<(String, &'a StateMachine)> {
+    fn find_tracked_variables<'a>(
+        &'a self,
+        parsed: &ParsedFile,
+    ) -> Vec<(String, &'a StateMachine)> {
         let mut tracked = Vec::new();
         let source = parsed.content.as_bytes();
 
@@ -685,16 +692,16 @@ impl TypestateAnalyzer {
 
                         // Check if the value is a call to a tracked type constructor
                         if semantics.is_call(value_node.kind()) {
-                            if let Some(func) = value_node.child_by_field_name(semantics.function_field)
+                            if let Some(func) =
+                                value_node.child_by_field_name(semantics.function_field)
                             {
                                 if let Ok(func_name) = func.utf8_text(source) {
                                     // Check if any state machine tracks this function/type
                                     for sm in state_machines {
                                         if sm.tracks_type(func_name)
-                                            || sm
-                                                .transitions
-                                                .iter()
-                                                .any(|t| t.trigger.matches_function_return(func_name))
+                                            || sm.transitions.iter().any(|t| {
+                                                t.trigger.matches_function_return(func_name)
+                                            })
                                         {
                                             tracked.push((var_name.clone(), sm));
                                             break;
@@ -932,10 +939,7 @@ impl TypestateAnalyzer {
                     TrackedState::Known(transition.to.clone())
                 } else {
                     // No valid transition - check if any transition from this state exists
-                    let has_any_transition = sm
-                        .transitions
-                        .iter()
-                        .any(|t| t.from == *state_name);
+                    let has_any_transition = sm.transitions.iter().any(|t| t.from == *state_name);
 
                     if has_any_transition {
                         violations.push(
@@ -988,7 +992,8 @@ impl TypestateAnalyzer {
     ) -> TrackedState {
         // Check for assignment transition
         if let TrackedState::Known(state_name) = current_state {
-            if let Some(transition) = sm.get_transition(state_name, &TransitionTrigger::Assignment) {
+            if let Some(transition) = sm.get_transition(state_name, &TransitionTrigger::Assignment)
+            {
                 return TrackedState::Known(transition.to.clone());
             }
         }
@@ -1188,7 +1193,11 @@ pub fn connection_state_machine() -> StateMachine {
         .with_state(State::new("Connected").with_final(false))
         .with_state(State::final_state("Closed"))
         .with_state(State::error("UseAfterClose"))
-        .with_transition(Transition::on_method("Disconnected", "Connected", "connect"))
+        .with_transition(Transition::on_method(
+            "Disconnected",
+            "Connected",
+            "connect",
+        ))
         .with_transition(Transition::on_method("Disconnected", "Connected", "open"))
         .with_transition(Transition::on_method("Connected", "Connected", "query"))
         .with_transition(Transition::on_method("Connected", "Connected", "execute"))
@@ -1292,9 +1301,7 @@ mod tests {
 
     #[test]
     fn test_state_builder() {
-        let s = State::new("Test")
-            .with_initial(true)
-            .with_final(true);
+        let s = State::new("Test").with_initial(true).with_final(true);
         assert!(s.is_initial);
         assert!(s.is_final);
     }
@@ -1639,12 +1646,11 @@ mod tests {
     #[test]
     fn test_multiple_state_machines() {
         let semantics = crate::semantics::LanguageSemantics::for_language(Language::JavaScript);
-        let analyzer = TypestateAnalyzer::new(semantics)
-            .with_state_machines(vec![
-                file_state_machine(),
-                lock_state_machine(),
-                connection_state_machine(),
-            ]);
+        let analyzer = TypestateAnalyzer::new(semantics).with_state_machines(vec![
+            file_state_machine(),
+            lock_state_machine(),
+            connection_state_machine(),
+        ]);
 
         assert_eq!(analyzer.state_machines().len(), 3);
     }

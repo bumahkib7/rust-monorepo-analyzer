@@ -117,7 +117,7 @@
 //! - Rust: File::open, Sha256::new, Aes::new
 //! - Java: FileInputStream, MessageDigest, Cipher
 
-use crate::flow::{BlockId, FlowContext, Terminator, CFG};
+use crate::flow::{BlockId, CFG, FlowContext, Terminator};
 use crate::rules::{Rule, create_finding_at_line};
 use rma_common::{Confidence, Finding, Language, Severity};
 use rma_parser::ParsedFile;
@@ -206,49 +206,52 @@ impl ViolationType {
     /// Convert violation to a finding message
     pub fn message(&self) -> String {
         match self {
-            ViolationType::UseInErrorState { operation, resource, .. } => {
+            ViolationType::UseInErrorState {
+                operation,
+                resource,
+                ..
+            } => {
                 format!(
                     "Attempted to {} closed resource '{}'. The file has already been closed.",
                     operation.name(),
                     resource
                 )
             }
-            ViolationType::InvalidTransition { operation, from_state, resource, .. } => {
-                match (operation, from_state) {
-                    (FileOperation::Open, FileState::Open) => {
-                        format!(
-                            "Resource '{}' is already open. Double-open may cause resource leak.",
-                            resource
-                        )
-                    }
-                    (FileOperation::Read, FileState::Unopened) => {
-                        format!(
-                            "Attempted to read from '{}' before opening it.",
-                            resource
-                        )
-                    }
-                    (FileOperation::Write, FileState::Unopened) => {
-                        format!(
-                            "Attempted to write to '{}' before opening it.",
-                            resource
-                        )
-                    }
-                    _ => {
-                        format!(
-                            "Invalid operation '{}' on resource '{}' in state {:?}.",
-                            operation.name(),
-                            resource,
-                            from_state
-                        )
-                    }
+            ViolationType::InvalidTransition {
+                operation,
+                from_state,
+                resource,
+                ..
+            } => match (operation, from_state) {
+                (FileOperation::Open, FileState::Open) => {
+                    format!(
+                        "Resource '{}' is already open. Double-open may cause resource leak.",
+                        resource
+                    )
                 }
-            }
-            ViolationType::NonFinalStateAtExit { state, resource, acquisition_line } => {
+                (FileOperation::Read, FileState::Unopened) => {
+                    format!("Attempted to read from '{}' before opening it.", resource)
+                }
+                (FileOperation::Write, FileState::Unopened) => {
+                    format!("Attempted to write to '{}' before opening it.", resource)
+                }
+                _ => {
+                    format!(
+                        "Invalid operation '{}' on resource '{}' in state {:?}.",
+                        operation.name(),
+                        resource,
+                        from_state
+                    )
+                }
+            },
+            ViolationType::NonFinalStateAtExit {
+                state,
+                resource,
+                acquisition_line,
+            } => {
                 format!(
                     "Resource '{}' (opened at line {}) may not be closed on all paths. State at exit: {:?}. This may cause a resource leak.",
-                    resource,
-                    acquisition_line,
-                    state
+                    resource, acquisition_line, state
                 )
             }
         }
@@ -268,7 +271,9 @@ impl ViolationType {
         match self {
             ViolationType::UseInErrorState { line, .. } => *line,
             ViolationType::InvalidTransition { line, .. } => *line,
-            ViolationType::NonFinalStateAtExit { acquisition_line, .. } => *acquisition_line,
+            ViolationType::NonFinalStateAtExit {
+                acquisition_line, ..
+            } => *acquisition_line,
         }
     }
 }
@@ -307,90 +312,118 @@ impl FileStateMachine {
     pub fn for_language(language: Language) -> Self {
         let transitions = vec![
             // Unopened -> Open (open/create)
-            Transition { from: FileState::Unopened, operation: FileOperation::Open, to: FileState::Open },
+            Transition {
+                from: FileState::Unopened,
+                operation: FileOperation::Open,
+                to: FileState::Open,
+            },
             // Open -> Open (read/write)
-            Transition { from: FileState::Open, operation: FileOperation::Read, to: FileState::Open },
-            Transition { from: FileState::Open, operation: FileOperation::Write, to: FileState::Open },
+            Transition {
+                from: FileState::Open,
+                operation: FileOperation::Read,
+                to: FileState::Open,
+            },
+            Transition {
+                from: FileState::Open,
+                operation: FileOperation::Write,
+                to: FileState::Open,
+            },
             // Open -> Closed (close)
-            Transition { from: FileState::Open, operation: FileOperation::Close, to: FileState::Closed },
+            Transition {
+                from: FileState::Open,
+                operation: FileOperation::Close,
+                to: FileState::Closed,
+            },
         ];
 
         match language {
             Language::JavaScript | Language::TypeScript => Self {
                 transitions,
                 open_patterns: vec![
-                    "fs.open", "fs.openSync", "fs.createReadStream", "fs.createWriteStream",
-                    "new FileHandle", "openSync", "createReadStream", "createWriteStream",
+                    "fs.open",
+                    "fs.openSync",
+                    "fs.createReadStream",
+                    "fs.createWriteStream",
+                    "new FileHandle",
+                    "openSync",
+                    "createReadStream",
+                    "createWriteStream",
                     "fs.promises.open",
                 ],
                 read_patterns: vec![
-                    "fs.read", "fs.readSync", ".read(", ".pipe(",
-                    "fs.readFile", "readFile", "readSync",
+                    "fs.read",
+                    "fs.readSync",
+                    ".read(",
+                    ".pipe(",
+                    "fs.readFile",
+                    "readFile",
+                    "readSync",
                 ],
                 write_patterns: vec![
-                    "fs.write", "fs.writeSync", ".write(",
-                    "fs.writeFile", "writeFile", "writeSync",
+                    "fs.write",
+                    "fs.writeSync",
+                    ".write(",
+                    "fs.writeFile",
+                    "writeFile",
+                    "writeSync",
                 ],
-                close_patterns: vec![
-                    ".close(", "fs.close", "fs.closeSync", ".end(", ".destroy(",
-                ],
-                safe_patterns: vec![
-                    "finally", ".finally(", "using",
-                ],
+                close_patterns: vec![".close(", "fs.close", "fs.closeSync", ".end(", ".destroy("],
+                safe_patterns: vec!["finally", ".finally(", "using"],
             },
             Language::Python => Self {
                 transitions,
                 open_patterns: vec![
-                    "open(", "io.open(", "Path.open(", "codecs.open(",
-                    "gzip.open(", "bz2.open(", "lzma.open(",
+                    "open(",
+                    "io.open(",
+                    "Path.open(",
+                    "codecs.open(",
+                    "gzip.open(",
+                    "bz2.open(",
+                    "lzma.open(",
                 ],
-                read_patterns: vec![
-                    ".read(", ".readline(", ".readlines(", ".read_text(",
-                ],
-                write_patterns: vec![
-                    ".write(", ".writelines(", ".write_text(",
-                ],
-                close_patterns: vec![
-                    ".close(",
-                ],
-                safe_patterns: vec![
-                    "with ", "async with ", "__enter__", "__exit__",
-                ],
+                read_patterns: vec![".read(", ".readline(", ".readlines(", ".read_text("],
+                write_patterns: vec![".write(", ".writelines(", ".write_text("],
+                close_patterns: vec![".close("],
+                safe_patterns: vec!["with ", "async with ", "__enter__", "__exit__"],
             },
             Language::Go => Self {
                 transitions,
                 open_patterns: vec![
-                    "os.Open(", "os.Create(", "os.OpenFile(",
-                    "ioutil.ReadFile(", "os.ReadFile(",
+                    "os.Open(",
+                    "os.Create(",
+                    "os.OpenFile(",
+                    "ioutil.ReadFile(",
+                    "os.ReadFile(",
                 ],
                 read_patterns: vec![
-                    ".Read(", "io.ReadAll(", "bufio.NewReader(",
-                    "ioutil.ReadAll(", ".ReadString(", ".ReadBytes(",
+                    ".Read(",
+                    "io.ReadAll(",
+                    "bufio.NewReader(",
+                    "ioutil.ReadAll(",
+                    ".ReadString(",
+                    ".ReadBytes(",
                 ],
-                write_patterns: vec![
-                    ".Write(", ".WriteString(", "io.WriteString(",
-                ],
-                close_patterns: vec![
-                    ".Close(",
-                ],
-                safe_patterns: vec![
-                    "defer ", "defer f.Close(", "defer file.Close(",
-                ],
+                write_patterns: vec![".Write(", ".WriteString(", "io.WriteString("],
+                close_patterns: vec![".Close("],
+                safe_patterns: vec!["defer ", "defer f.Close(", "defer file.Close("],
             },
             Language::Rust => Self {
                 transitions,
                 open_patterns: vec![
-                    "File::open(", "File::create(", "OpenOptions::new(",
-                    "fs::File::open(", "fs::File::create(",
+                    "File::open(",
+                    "File::create(",
+                    "OpenOptions::new(",
+                    "fs::File::open(",
+                    "fs::File::create(",
                 ],
                 read_patterns: vec![
-                    ".read(", ".read_to_string(", ".read_to_end(",
-                    "BufReader::new(", ".read_line(",
+                    ".read(",
+                    ".read_to_string(",
+                    ".read_to_end(",
+                    "BufReader::new(",
+                    ".read_line(",
                 ],
-                write_patterns: vec![
-                    ".write(", ".write_all(", ".write_fmt(",
-                    "BufWriter::new(",
-                ],
+                write_patterns: vec![".write(", ".write_all(", ".write_fmt(", "BufWriter::new("],
                 close_patterns: vec![
                     "drop(", ".flush(", // Rust uses RAII, so explicit close is rare
                 ],
@@ -402,29 +435,37 @@ impl FileStateMachine {
             Language::Java => Self {
                 transitions,
                 open_patterns: vec![
-                    "new FileInputStream(", "new FileOutputStream(",
-                    "new FileReader(", "new FileWriter(",
-                    "new BufferedReader(", "new BufferedWriter(",
-                    "new BufferedInputStream(", "new BufferedOutputStream(",
-                    "new RandomAccessFile(", "new PrintWriter(",
-                    "new Scanner(", "Files.newInputStream(",
-                    "Files.newOutputStream(", "Files.newBufferedReader(",
+                    "new FileInputStream(",
+                    "new FileOutputStream(",
+                    "new FileReader(",
+                    "new FileWriter(",
+                    "new BufferedReader(",
+                    "new BufferedWriter(",
+                    "new BufferedInputStream(",
+                    "new BufferedOutputStream(",
+                    "new RandomAccessFile(",
+                    "new PrintWriter(",
+                    "new Scanner(",
+                    "Files.newInputStream(",
+                    "Files.newOutputStream(",
+                    "Files.newBufferedReader(",
                     "Files.newBufferedWriter(",
                 ],
                 read_patterns: vec![
-                    ".read(", ".readLine(", ".readAllBytes(",
-                    ".readAllLines(", ".lines(",
+                    ".read(",
+                    ".readLine(",
+                    ".readAllBytes(",
+                    ".readAllLines(",
+                    ".lines(",
                 ],
-                write_patterns: vec![
-                    ".write(", ".println(", ".print(",
-                    ".append(",
-                ],
-                close_patterns: vec![
-                    ".close(",
-                ],
+                write_patterns: vec![".write(", ".println(", ".print(", ".append("],
+                close_patterns: vec![".close("],
                 safe_patterns: vec![
-                    "try (", "try-with-resources", "@Cleanup",
-                    "AutoCloseable", "Closeable",
+                    "try (",
+                    "try-with-resources",
+                    "@Cleanup",
+                    "AutoCloseable",
+                    "Closeable",
                 ],
             },
             _ => Self {
@@ -475,7 +516,11 @@ impl FileStateMachine {
     }
 
     /// Apply a transition and return the new state
-    pub fn apply_transition(&self, current: FileState, operation: FileOperation) -> Result<FileState, ViolationType> {
+    pub fn apply_transition(
+        &self,
+        current: FileState,
+        operation: FileOperation,
+    ) -> Result<FileState, ViolationType> {
         // Check for invalid operations on closed state
         if current == FileState::Closed {
             if operation != FileOperation::Open {
@@ -539,11 +584,7 @@ impl TypestateAnalyzer {
     }
 
     /// Analyze a parsed file and return violations
-    pub fn analyze(
-        &self,
-        parsed: &ParsedFile,
-        cfg: &CFG,
-    ) -> Vec<ViolationType> {
+    pub fn analyze(&self, parsed: &ParsedFile, cfg: &CFG) -> Vec<ViolationType> {
         let source = parsed.content.as_bytes();
         let root = parsed.tree.root_node();
         let mut violations = Vec::new();
@@ -588,7 +629,8 @@ impl TypestateAnalyzer {
         if let Ok(text) = node.utf8_text(source) {
             // Check if this creates a file resource
             if self.state_machine.detect_operation(text) == Some(FileOperation::Open) {
-                let var_name = self.get_assigned_variable(node, source, language)
+                let var_name = self
+                    .get_assigned_variable(node, source, language)
                     .unwrap_or_else(|| "anonymous".to_string());
 
                 let is_safe = self.is_in_safe_context(node, source, language);
@@ -630,7 +672,9 @@ impl TypestateAnalyzer {
                     }
                 }
                 Language::Java => {
-                    if n.kind() == "try_with_resources_statement" || n.kind() == "resource_specification" {
+                    if n.kind() == "try_with_resources_statement"
+                        || n.kind() == "resource_specification"
+                    {
                         return true;
                     }
                 }
@@ -661,7 +705,10 @@ impl TypestateAnalyzer {
 
         // Find the enclosing function
         while let Some(n) = current {
-            if n.kind() == "function_declaration" || n.kind() == "method_declaration" || n.kind() == "func_literal" {
+            if n.kind() == "function_declaration"
+                || n.kind() == "method_declaration"
+                || n.kind() == "func_literal"
+            {
                 return self.search_for_defer_close(n, source);
             }
             current = n.parent();
@@ -691,12 +738,19 @@ impl TypestateAnalyzer {
     }
 
     /// Get the variable name a resource is assigned to
-    fn get_assigned_variable(&self, node: Node<'_>, source: &[u8], language: Language) -> Option<String> {
+    fn get_assigned_variable(
+        &self,
+        node: Node<'_>,
+        source: &[u8],
+        language: Language,
+    ) -> Option<String> {
         let parent = node.parent()?;
 
         match language {
             Language::JavaScript | Language::TypeScript => {
-                if parent.kind() == "variable_declarator" || parent.kind() == "assignment_expression" {
+                if parent.kind() == "variable_declarator"
+                    || parent.kind() == "assignment_expression"
+                {
                     if let Some(name_node) = parent.child(0) {
                         if let Ok(name) = name_node.utf8_text(source) {
                             return Some(name.to_string());
@@ -714,7 +768,9 @@ impl TypestateAnalyzer {
                 }
             }
             Language::Go => {
-                if parent.kind() == "short_var_declaration" || parent.kind() == "assignment_statement" {
+                if parent.kind() == "short_var_declaration"
+                    || parent.kind() == "assignment_statement"
+                {
                     if let Some(left) = parent.child_by_field_name("left") {
                         if let Ok(name) = left.utf8_text(source) {
                             return Some(name.to_string());
@@ -732,7 +788,9 @@ impl TypestateAnalyzer {
                 }
             }
             Language::Java => {
-                if parent.kind() == "variable_declarator" || parent.kind() == "local_variable_declaration" {
+                if parent.kind() == "variable_declarator"
+                    || parent.kind() == "local_variable_declaration"
+                {
                     if let Some(name_node) = parent.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(source) {
                             return Some(name.to_string());
@@ -778,11 +836,19 @@ impl TypestateAnalyzer {
                 Err(mut violation) => {
                     // Fill in resource details
                     match &mut violation {
-                        ViolationType::UseInErrorState { resource: r, line: l, .. } => {
+                        ViolationType::UseInErrorState {
+                            resource: r,
+                            line: l,
+                            ..
+                        } => {
                             *r = resource.var_name.clone();
                             *l = line;
                         }
-                        ViolationType::InvalidTransition { resource: r, line: l, .. } => {
+                        ViolationType::InvalidTransition {
+                            resource: r,
+                            line: l,
+                            ..
+                        } => {
                             *r = resource.var_name.clone();
                             *l = line;
                         }
@@ -798,8 +864,13 @@ impl TypestateAnalyzer {
             // Check if any exit is reachable from the acquisition without close
             let exit_blocks = self.find_exit_blocks(cfg);
             let has_leak_path = exit_blocks.iter().any(|&exit| {
-                cfg.can_reach(resource.acquisition_block, exit) &&
-                !self.has_close_on_all_paths(cfg, resource.acquisition_block, exit, &operations)
+                cfg.can_reach(resource.acquisition_block, exit)
+                    && !self.has_close_on_all_paths(
+                        cfg,
+                        resource.acquisition_block,
+                        exit,
+                        &operations,
+                    )
             });
 
             if has_leak_path {
@@ -939,49 +1010,43 @@ impl FileTypestateRule {
             ViolationType::UseInErrorState { .. } => {
                 "Ensure the resource is open before performing operations on it.".to_string()
             }
-            ViolationType::InvalidTransition { operation, .. } => {
-                match operation {
-                    FileOperation::Open => {
-                        "Close the existing file before opening a new one, or use a different variable.".to_string()
-                    }
-                    _ => "Check the resource state before performing this operation.".to_string()
+            ViolationType::InvalidTransition { operation, .. } => match operation {
+                FileOperation::Open => {
+                    "Close the existing file before opening a new one, or use a different variable."
+                        .to_string()
                 }
-            }
-            ViolationType::NonFinalStateAtExit { resource, .. } => {
-                match language {
-                    Language::JavaScript | Language::TypeScript => {
-                        format!(
-                            "Ensure '{}' is closed in a finally block: try {{ ... }} finally {{ {}.close(); }}",
-                            resource, resource
-                        )
-                    }
-                    Language::Python => {
-                        format!(
-                            "Use a context manager: with open(...) as {}: ...",
-                            resource
-                        )
-                    }
-                    Language::Go => {
-                        format!(
-                            "Use defer to ensure '{}' is closed: defer {}.Close()",
-                            resource, resource
-                        )
-                    }
-                    Language::Rust => {
-                        format!(
-                            "Rust uses RAII - ensure '{}' goes out of scope properly or call drop() explicitly.",
-                            resource
-                        )
-                    }
-                    Language::Java => {
-                        format!(
-                            "Use try-with-resources: try ({} = ...) {{ ... }}",
-                            resource
-                        )
-                    }
-                    _ => format!("Ensure '{}' is properly closed on all execution paths.", resource)
+                _ => "Check the resource state before performing this operation.".to_string(),
+            },
+            ViolationType::NonFinalStateAtExit { resource, .. } => match language {
+                Language::JavaScript | Language::TypeScript => {
+                    format!(
+                        "Ensure '{}' is closed in a finally block: try {{ ... }} finally {{ {}.close(); }}",
+                        resource, resource
+                    )
                 }
-            }
+                Language::Python => {
+                    format!("Use a context manager: with open(...) as {}: ...", resource)
+                }
+                Language::Go => {
+                    format!(
+                        "Use defer to ensure '{}' is closed: defer {}.Close()",
+                        resource, resource
+                    )
+                }
+                Language::Rust => {
+                    format!(
+                        "Rust uses RAII - ensure '{}' goes out of scope properly or call drop() explicitly.",
+                        resource
+                    )
+                }
+                Language::Java => {
+                    format!("Use try-with-resources: try ({} = ...) {{ ... }}", resource)
+                }
+                _ => format!(
+                    "Ensure '{}' is properly closed on all execution paths.",
+                    resource
+                ),
+            },
         }
     }
 }
@@ -1074,19 +1139,23 @@ mod tests {
 
         // Valid transitions
         assert_eq!(
-            sm.apply_transition(FileState::Unopened, FileOperation::Open).unwrap(),
+            sm.apply_transition(FileState::Unopened, FileOperation::Open)
+                .unwrap(),
             FileState::Open
         );
         assert_eq!(
-            sm.apply_transition(FileState::Open, FileOperation::Read).unwrap(),
+            sm.apply_transition(FileState::Open, FileOperation::Read)
+                .unwrap(),
             FileState::Open
         );
         assert_eq!(
-            sm.apply_transition(FileState::Open, FileOperation::Write).unwrap(),
+            sm.apply_transition(FileState::Open, FileOperation::Write)
+                .unwrap(),
             FileState::Open
         );
         assert_eq!(
-            sm.apply_transition(FileState::Open, FileOperation::Close).unwrap(),
+            sm.apply_transition(FileState::Open, FileOperation::Close)
+                .unwrap(),
             FileState::Closed
         );
     }
@@ -1105,7 +1174,10 @@ mod tests {
 
         // Read on unopened should fail
         let result = sm.apply_transition(FileState::Unopened, FileOperation::Read);
-        assert!(matches!(result, Err(ViolationType::InvalidTransition { .. })));
+        assert!(matches!(
+            result,
+            Err(ViolationType::InvalidTransition { .. })
+        ));
     }
 
     #[test]
@@ -1124,28 +1196,58 @@ mod tests {
     fn test_js_detect_open_operations() {
         let sm = FileStateMachine::for_language(Language::JavaScript);
 
-        assert_eq!(sm.detect_operation("fs.open('file.txt')"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("fs.createReadStream('file.txt')"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("fs.createWriteStream('file.txt')"), Some(FileOperation::Open));
+        assert_eq!(
+            sm.detect_operation("fs.open('file.txt')"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("fs.createReadStream('file.txt')"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("fs.createWriteStream('file.txt')"),
+            Some(FileOperation::Open)
+        );
     }
 
     #[test]
     fn test_js_detect_close_operations() {
         let sm = FileStateMachine::for_language(Language::JavaScript);
 
-        assert_eq!(sm.detect_operation("file.close()"), Some(FileOperation::Close));
-        assert_eq!(sm.detect_operation("fs.closeSync(fd)"), Some(FileOperation::Close));
-        assert_eq!(sm.detect_operation("stream.end()"), Some(FileOperation::Close));
+        assert_eq!(
+            sm.detect_operation("file.close()"),
+            Some(FileOperation::Close)
+        );
+        assert_eq!(
+            sm.detect_operation("fs.closeSync(fd)"),
+            Some(FileOperation::Close)
+        );
+        assert_eq!(
+            sm.detect_operation("stream.end()"),
+            Some(FileOperation::Close)
+        );
     }
 
     #[test]
     fn test_js_detect_read_write_operations() {
         let sm = FileStateMachine::for_language(Language::JavaScript);
 
-        assert_eq!(sm.detect_operation("fs.read(fd, buffer)"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("stream.pipe(dest)"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("fs.write(fd, data)"), Some(FileOperation::Write));
-        assert_eq!(sm.detect_operation("file.write('data')"), Some(FileOperation::Write));
+        assert_eq!(
+            sm.detect_operation("fs.read(fd, buffer)"),
+            Some(FileOperation::Read)
+        );
+        assert_eq!(
+            sm.detect_operation("stream.pipe(dest)"),
+            Some(FileOperation::Read)
+        );
+        assert_eq!(
+            sm.detect_operation("fs.write(fd, data)"),
+            Some(FileOperation::Write)
+        );
+        assert_eq!(
+            sm.detect_operation("file.write('data')"),
+            Some(FileOperation::Write)
+        );
     }
 
     #[test]
@@ -1164,10 +1266,19 @@ mod tests {
     fn test_python_detect_operations() {
         let sm = FileStateMachine::for_language(Language::Python);
 
-        assert_eq!(sm.detect_operation("open('file.txt')"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("io.open('file.txt')"), Some(FileOperation::Open));
+        assert_eq!(
+            sm.detect_operation("open('file.txt')"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("io.open('file.txt')"),
+            Some(FileOperation::Open)
+        );
         assert_eq!(sm.detect_operation("f.read()"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("f.write('data')"), Some(FileOperation::Write));
+        assert_eq!(
+            sm.detect_operation("f.write('data')"),
+            Some(FileOperation::Write)
+        );
         assert_eq!(sm.detect_operation("f.close()"), Some(FileOperation::Close));
     }
 
@@ -1188,11 +1299,26 @@ mod tests {
     fn test_go_detect_operations() {
         let sm = FileStateMachine::for_language(Language::Go);
 
-        assert_eq!(sm.detect_operation("os.Open(\"file.txt\")"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("os.Create(\"file.txt\")"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("os.OpenFile(\"file.txt\", os.O_RDWR, 0644)"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("f.Read(buf)"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("f.Write(data)"), Some(FileOperation::Write));
+        assert_eq!(
+            sm.detect_operation("os.Open(\"file.txt\")"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("os.Create(\"file.txt\")"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("os.OpenFile(\"file.txt\", os.O_RDWR, 0644)"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("f.Read(buf)"),
+            Some(FileOperation::Read)
+        );
+        assert_eq!(
+            sm.detect_operation("f.Write(data)"),
+            Some(FileOperation::Write)
+        );
         assert_eq!(sm.detect_operation("f.Close()"), Some(FileOperation::Close));
     }
 
@@ -1213,12 +1339,30 @@ mod tests {
     fn test_rust_detect_operations() {
         let sm = FileStateMachine::for_language(Language::Rust);
 
-        assert_eq!(sm.detect_operation("File::open(\"file.txt\")"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("File::create(\"file.txt\")"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("file.read(&mut buffer)"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("file.read_to_string(&mut contents)"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("file.write(data)"), Some(FileOperation::Write));
-        assert_eq!(sm.detect_operation("file.write_all(data)"), Some(FileOperation::Write));
+        assert_eq!(
+            sm.detect_operation("File::open(\"file.txt\")"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("File::create(\"file.txt\")"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("file.read(&mut buffer)"),
+            Some(FileOperation::Read)
+        );
+        assert_eq!(
+            sm.detect_operation("file.read_to_string(&mut contents)"),
+            Some(FileOperation::Read)
+        );
+        assert_eq!(
+            sm.detect_operation("file.write(data)"),
+            Some(FileOperation::Write)
+        );
+        assert_eq!(
+            sm.detect_operation("file.write_all(data)"),
+            Some(FileOperation::Write)
+        );
     }
 
     #[test]
@@ -1238,14 +1382,38 @@ mod tests {
     fn test_java_detect_operations() {
         let sm = FileStateMachine::for_language(Language::Java);
 
-        assert_eq!(sm.detect_operation("new FileInputStream(\"file.txt\")"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("new FileOutputStream(\"file.txt\")"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("new BufferedReader(reader)"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("Files.newInputStream(path)"), Some(FileOperation::Open));
-        assert_eq!(sm.detect_operation("reader.read()"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("reader.readLine()"), Some(FileOperation::Read));
-        assert_eq!(sm.detect_operation("writer.write(data)"), Some(FileOperation::Write));
-        assert_eq!(sm.detect_operation("stream.close()"), Some(FileOperation::Close));
+        assert_eq!(
+            sm.detect_operation("new FileInputStream(\"file.txt\")"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("new FileOutputStream(\"file.txt\")"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("new BufferedReader(reader)"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("Files.newInputStream(path)"),
+            Some(FileOperation::Open)
+        );
+        assert_eq!(
+            sm.detect_operation("reader.read()"),
+            Some(FileOperation::Read)
+        );
+        assert_eq!(
+            sm.detect_operation("reader.readLine()"),
+            Some(FileOperation::Read)
+        );
+        assert_eq!(
+            sm.detect_operation("writer.write(data)"),
+            Some(FileOperation::Write)
+        );
+        assert_eq!(
+            sm.detect_operation("stream.close()"),
+            Some(FileOperation::Close)
+        );
     }
 
     #[test]
@@ -1424,35 +1592,28 @@ impl LockStateMachine {
     pub fn for_language(language: Language) -> Self {
         match language {
             Language::JavaScript | Language::TypeScript => Self {
-                lock_patterns: vec![
-                    ".acquire(", ".lock(", "mutex.acquire(", "lock.acquire(",
-                ],
-                unlock_patterns: vec![
-                    ".release(", ".unlock(", "mutex.release(", "lock.unlock(",
-                ],
+                lock_patterns: vec![".acquire(", ".lock(", "mutex.acquire(", "lock.acquire("],
+                unlock_patterns: vec![".release(", ".unlock(", "mutex.release(", "lock.unlock("],
                 safe_patterns: vec!["finally", ".finally(", "using"],
             },
             Language::Python => Self {
-                lock_patterns: vec![
-                    ".acquire(", "lock.acquire(", "Lock()",
-                ],
-                unlock_patterns: vec![
-                    ".release(", "lock.release(",
-                ],
+                lock_patterns: vec![".acquire(", "lock.acquire(", "Lock()"],
+                unlock_patterns: vec![".release(", "lock.release("],
                 safe_patterns: vec!["with ", "async with "],
             },
             Language::Go => Self {
-                lock_patterns: vec![
-                    ".Lock(", ".RLock(", "mutex.Lock(", "RWMutex.Lock(",
-                ],
-                unlock_patterns: vec![
-                    ".Unlock(", ".RUnlock(", "mutex.Unlock(",
-                ],
+                lock_patterns: vec![".Lock(", ".RLock(", "mutex.Lock(", "RWMutex.Lock("],
+                unlock_patterns: vec![".Unlock(", ".RUnlock(", "mutex.Unlock("],
                 safe_patterns: vec!["defer ", "defer m.Unlock(", "defer lock.Unlock("],
             },
             Language::Rust => Self {
                 lock_patterns: vec![
-                    ".lock()", ".read()", ".write()", "Mutex::lock(", "RwLock::read(", "RwLock::write(",
+                    ".lock()",
+                    ".read()",
+                    ".write()",
+                    "Mutex::lock(",
+                    "RwLock::read(",
+                    "RwLock::write(",
                 ],
                 unlock_patterns: vec![
                     "drop(", // Rust locks are released via Drop
@@ -1460,12 +1621,8 @@ impl LockStateMachine {
                 safe_patterns: vec!["}", "?"], // RAII handles cleanup
             },
             Language::Java => Self {
-                lock_patterns: vec![
-                    ".lock()", ".tryLock(", "Lock.lock(", "synchronized(",
-                ],
-                unlock_patterns: vec![
-                    ".unlock()",
-                ],
+                lock_patterns: vec![".lock()", ".tryLock(", "Lock.lock(", "synchronized("],
+                unlock_patterns: vec![".unlock()"],
                 safe_patterns: vec!["try (", "finally", "synchronized"],
             },
             _ => Self {
@@ -1566,11 +1723,15 @@ impl Rule for LockTypestateRule {
                             line_num,
                             line.trim(),
                             Severity::Warning,
-                            &format!("Potential double-lock: lock already acquired at line {}", lock_line),
+                            &format!(
+                                "Potential double-lock: lock already acquired at line {}",
+                                lock_line
+                            ),
                             parsed.language,
                         );
                         finding.confidence = Confidence::Medium;
-                        finding.suggestion = Some("Ensure the lock is released before re-acquiring.".to_string());
+                        finding.suggestion =
+                            Some("Ensure the lock is released before re-acquiring.".to_string());
                         findings.push(finding);
                     }
                     (LockState::Unlocked, LockOperation::Unlock) => {
@@ -1585,7 +1746,8 @@ impl Rule for LockTypestateRule {
                             parsed.language,
                         );
                         finding.confidence = Confidence::Medium;
-                        finding.suggestion = Some("Ensure the lock is acquired before releasing.".to_string());
+                        finding.suggestion =
+                            Some("Ensure the lock is acquired before releasing.".to_string());
                         findings.push(finding);
                     }
                     _ => {}
@@ -1672,12 +1834,18 @@ impl CryptoState {
 
     /// Check if operations are valid in this state
     pub fn can_update(&self) -> bool {
-        matches!(self, CryptoState::Created | CryptoState::Initialized | CryptoState::Processing)
+        matches!(
+            self,
+            CryptoState::Created | CryptoState::Initialized | CryptoState::Processing
+        )
     }
 
     /// Check if finalization is valid in this state
     pub fn can_finalize(&self) -> bool {
-        matches!(self, CryptoState::Created | CryptoState::Initialized | CryptoState::Processing)
+        matches!(
+            self,
+            CryptoState::Created | CryptoState::Initialized | CryptoState::Processing
+        )
     }
 }
 
@@ -1810,41 +1978,76 @@ impl CryptoStateMachine {
                 "CryptoJS.DES.encrypt(",
                 "CryptoJS.DES.decrypt(",
             ],
-            cipher_init: vec![
-                ".setKey(",
-                ".setAAD(",
-                ".setAutoPadding(",
-            ],
-            update_patterns: vec![
-                ".update(",
-                ".write(",
-            ],
-            finalize_patterns: vec![
-                ".digest(",
-                ".final(",
-                ".end(",
-            ],
-            reset_patterns: vec![
-                ".reset(",
-            ],
+            cipher_init: vec![".setKey(", ".setAAD(", ".setAutoPadding("],
+            update_patterns: vec![".update(", ".write("],
+            finalize_patterns: vec![".digest(", ".final(", ".end("],
+            reset_patterns: vec![".reset("],
             weak_algorithms: vec![
-                ("createHash('md5')", "MD5", "MD5 is cryptographically broken"),
-                ("createHash(\"md5\")", "MD5", "MD5 is cryptographically broken"),
-                ("createHash('sha1')", "SHA1", "SHA1 is deprecated for security use"),
-                ("createHash(\"sha1\")", "SHA1", "SHA1 is deprecated for security use"),
+                (
+                    "createHash('md5')",
+                    "MD5",
+                    "MD5 is cryptographically broken",
+                ),
+                (
+                    "createHash(\"md5\")",
+                    "MD5",
+                    "MD5 is cryptographically broken",
+                ),
+                (
+                    "createHash('sha1')",
+                    "SHA1",
+                    "SHA1 is deprecated for security use",
+                ),
+                (
+                    "createHash(\"sha1\")",
+                    "SHA1",
+                    "SHA1 is deprecated for security use",
+                ),
                 ("CryptoJS.MD5(", "MD5", "MD5 is cryptographically broken"),
-                ("CryptoJS.SHA1(", "SHA1", "SHA1 is deprecated for security use"),
+                (
+                    "CryptoJS.SHA1(",
+                    "SHA1",
+                    "SHA1 is deprecated for security use",
+                ),
                 ("createCipher('des", "DES", "DES is cryptographically weak"),
                 ("createCipher(\"des", "DES", "DES is cryptographically weak"),
-                ("createCipher('rc4", "RC4", "RC4 is cryptographically broken"),
-                ("createCipher(\"rc4", "RC4", "RC4 is cryptographically broken"),
+                (
+                    "createCipher('rc4",
+                    "RC4",
+                    "RC4 is cryptographically broken",
+                ),
+                (
+                    "createCipher(\"rc4",
+                    "RC4",
+                    "RC4 is cryptographically broken",
+                ),
             ],
             unsafe_modes: vec![
-                ("'aes-128-ecb'", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("\"aes-128-ecb\"", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("'aes-256-ecb'", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("\"aes-256-ecb\"", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("mode: CryptoJS.mode.ECB", "ECB", "ECB mode is deterministic and leaks patterns"),
+                (
+                    "'aes-128-ecb'",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "\"aes-128-ecb\"",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "'aes-256-ecb'",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "\"aes-256-ecb\"",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "mode: CryptoJS.mode.ECB",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
             ],
         }
     }
@@ -1863,10 +2066,7 @@ impl CryptoStateMachine {
                 "SHA256.new(",
                 "SHA512.new(",
             ],
-            hmac_create: vec![
-                "hmac.new(",
-                "HMAC.new(",
-            ],
+            hmac_create: vec!["hmac.new(", "HMAC.new("],
             cipher_create: vec![
                 "Cipher(",
                 "AES.new(",
@@ -1879,9 +2079,7 @@ impl CryptoStateMachine {
             cipher_init: vec![
                 // Python crypto usually initializes in constructor
             ],
-            update_patterns: vec![
-                ".update(",
-            ],
+            update_patterns: vec![".update("],
             finalize_patterns: vec![
                 ".digest(",
                 ".hexdigest(",
@@ -1895,15 +2093,31 @@ impl CryptoStateMachine {
             weak_algorithms: vec![
                 ("hashlib.md5(", "MD5", "MD5 is cryptographically broken"),
                 ("MD5.new(", "MD5", "MD5 is cryptographically broken"),
-                ("hashlib.sha1(", "SHA1", "SHA1 is deprecated for security use"),
+                (
+                    "hashlib.sha1(",
+                    "SHA1",
+                    "SHA1 is deprecated for security use",
+                ),
                 ("SHA.new(", "SHA1", "SHA1 is deprecated for security use"),
                 ("DES.new(", "DES", "DES is cryptographically weak"),
                 ("ARC4.new(", "RC4", "RC4 is cryptographically broken"),
             ],
             unsafe_modes: vec![
-                ("MODE_ECB", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("AES.MODE_ECB", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("DES.MODE_ECB", "ECB", "ECB mode is deterministic and leaks patterns"),
+                (
+                    "MODE_ECB",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "AES.MODE_ECB",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "DES.MODE_ECB",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
             ],
         }
     }
@@ -1919,9 +2133,7 @@ impl CryptoStateMachine {
                 "sha256.New224(",
                 "sha512.New384(",
             ],
-            hmac_create: vec![
-                "hmac.New(",
-            ],
+            hmac_create: vec!["hmac.New("],
             cipher_create: vec![
                 "aes.NewCipher(",
                 "des.NewCipher(",
@@ -1937,9 +2149,7 @@ impl CryptoStateMachine {
                 "cipher.NewCFBEncrypter(",
                 "cipher.NewCFBDecrypter(",
             ],
-            update_patterns: vec![
-                ".Write(",
-            ],
+            update_patterns: vec![".Write("],
             finalize_patterns: vec![
                 ".Sum(",
                 ".Seal(",
@@ -1947,9 +2157,7 @@ impl CryptoStateMachine {
                 ".XORKeyStream(",
                 ".CryptBlocks(",
             ],
-            reset_patterns: vec![
-                ".Reset(",
-            ],
+            reset_patterns: vec![".Reset("],
             weak_algorithms: vec![
                 ("md5.New(", "MD5", "MD5 is cryptographically broken"),
                 ("md5.Sum(", "MD5", "MD5 is cryptographically broken"),
@@ -1960,8 +2168,16 @@ impl CryptoStateMachine {
             ],
             unsafe_modes: vec![
                 // Go doesn't have a direct ECB mode, but CryptBlocks without proper mode is ECB
-                ("NewECBEncrypter(", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("NewECBDecrypter(", "ECB", "ECB mode is deterministic and leaks patterns"),
+                (
+                    "NewECBEncrypter(",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "NewECBDecrypter(",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
             ],
         }
     }
@@ -1978,11 +2194,7 @@ impl CryptoStateMachine {
                 "Sha384::new(",
                 "Digest::new(",
             ],
-            hmac_create: vec![
-                "Hmac::new(",
-                "HmacSha256::new(",
-                "HmacSha512::new(",
-            ],
+            hmac_create: vec!["Hmac::new(", "HmacSha256::new(", "HmacSha512::new("],
             cipher_create: vec![
                 "Aes128::new(",
                 "Aes256::new(",
@@ -1994,10 +2206,7 @@ impl CryptoStateMachine {
             cipher_init: vec![
                 // Rust crypto usually initializes in constructor
             ],
-            update_patterns: vec![
-                ".update(",
-                ".chain(",
-            ],
+            update_patterns: vec![".update(", ".chain("],
             finalize_patterns: vec![
                 ".finalize(",
                 ".finalize_reset(",
@@ -2005,18 +2214,23 @@ impl CryptoStateMachine {
                 ".encrypt(",
                 ".decrypt(",
             ],
-            reset_patterns: vec![
-                ".reset(",
-                ".finalize_reset(",
-            ],
+            reset_patterns: vec![".reset(", ".finalize_reset("],
             weak_algorithms: vec![
                 ("Md5::new(", "MD5", "MD5 is cryptographically broken"),
                 ("Sha1::new(", "SHA1", "SHA1 is deprecated for security use"),
                 ("Des::new(", "DES", "DES is cryptographically weak"),
             ],
             unsafe_modes: vec![
-                ("Ecb::", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("ecb::", "ECB", "ECB mode is deterministic and leaks patterns"),
+                (
+                    "Ecb::",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "ecb::",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
             ],
         }
     }
@@ -2030,26 +2244,12 @@ impl CryptoStateMachine {
                 "DigestUtils.sha1(",
                 "DigestUtils.sha256(",
             ],
-            hmac_create: vec![
-                "Mac.getInstance(",
-            ],
-            cipher_create: vec![
-                "Cipher.getInstance(",
-                "SecretKeySpec(",
-            ],
-            cipher_init: vec![
-                ".init(",
-            ],
-            update_patterns: vec![
-                ".update(",
-            ],
-            finalize_patterns: vec![
-                ".digest(",
-                ".doFinal(",
-            ],
-            reset_patterns: vec![
-                ".reset(",
-            ],
+            hmac_create: vec!["Mac.getInstance("],
+            cipher_create: vec!["Cipher.getInstance(", "SecretKeySpec("],
+            cipher_init: vec![".init("],
+            update_patterns: vec![".update("],
+            finalize_patterns: vec![".digest(", ".doFinal("],
+            reset_patterns: vec![".reset("],
             weak_algorithms: vec![
                 ("\"MD5\"", "MD5", "MD5 is cryptographically broken"),
                 ("\"SHA-1\"", "SHA1", "SHA1 is deprecated for security use"),
@@ -2058,12 +2258,28 @@ impl CryptoStateMachine {
                 ("\"RC4\"", "RC4", "RC4 is cryptographically broken"),
                 ("\"ARCFOUR\"", "RC4", "RC4 is cryptographically broken"),
                 ("DigestUtils.md5(", "MD5", "MD5 is cryptographically broken"),
-                ("DigestUtils.sha1(", "SHA1", "SHA1 is deprecated for security use"),
+                (
+                    "DigestUtils.sha1(",
+                    "SHA1",
+                    "SHA1 is deprecated for security use",
+                ),
             ],
             unsafe_modes: vec![
-                ("\"AES/ECB/", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("\"DES/ECB/", "ECB", "ECB mode is deterministic and leaks patterns"),
-                ("\"/ECB/\"", "ECB", "ECB mode is deterministic and leaks patterns"),
+                (
+                    "\"AES/ECB/",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "\"DES/ECB/",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
+                (
+                    "\"/ECB/\"",
+                    "ECB",
+                    "ECB mode is deterministic and leaks patterns",
+                ),
             ],
         }
     }
@@ -2356,7 +2572,8 @@ impl Rule for CryptoTypestateRule {
                             );
                             finding.confidence = Confidence::High;
                             finding.suggestion = Some(
-                                "Initialize the cipher with a key and IV before finalizing.".to_string(),
+                                "Initialize the cipher with a key and IV before finalizing."
+                                    .to_string(),
                             );
                             findings.push(finding);
                         }
@@ -2439,7 +2656,10 @@ impl DatabaseState {
 
     /// Check if queries can be executed in this state
     pub fn can_query(&self) -> bool {
-        matches!(self, DatabaseState::Connected | DatabaseState::InTransaction)
+        matches!(
+            self,
+            DatabaseState::Connected | DatabaseState::InTransaction
+        )
     }
 
     /// Check if transaction operations are valid in this state
@@ -2499,51 +2719,66 @@ pub enum DatabaseViolation {
         current_state: DatabaseState,
     },
     /// Commit/rollback when not in a transaction
-    InvalidTransactionOp {
-        action: DatabaseAction,
-    },
+    InvalidTransactionOp { action: DatabaseAction },
     /// Closing connection while transaction is active
-    UncommittedTransaction {
-        transaction_started_line: usize,
-    },
+    UncommittedTransaction { transaction_started_line: usize },
     /// Function exits without closing connection
-    ConnectionLeak {
-        connect_line: usize,
-    },
+    ConnectionLeak { connect_line: usize },
     /// Starting transaction when already in one
-    NestedTransaction {
-        outer_transaction_line: usize,
-    },
+    NestedTransaction { outer_transaction_line: usize },
     /// Query on closed connection
-    QueryAfterClose {
-        close_line: usize,
-    },
+    QueryAfterClose { close_line: usize },
     /// Double close
-    DoubleClose {
-        first_close_line: usize,
-    },
+    DoubleClose { first_close_line: usize },
 }
 
 impl std::fmt::Display for DatabaseViolation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DatabaseViolation::UseInErrorState { action, current_state } => {
-                write!(f, "Cannot {} when connection is in {} state", action, current_state)
+            DatabaseViolation::UseInErrorState {
+                action,
+                current_state,
+            } => {
+                write!(
+                    f,
+                    "Cannot {} when connection is in {} state",
+                    action, current_state
+                )
             }
             DatabaseViolation::InvalidTransactionOp { action } => {
                 write!(f, "Cannot {} when not in a transaction", action)
             }
-            DatabaseViolation::UncommittedTransaction { transaction_started_line } => {
-                write!(f, "Connection closed with uncommitted transaction (started at line {})", transaction_started_line)
+            DatabaseViolation::UncommittedTransaction {
+                transaction_started_line,
+            } => {
+                write!(
+                    f,
+                    "Connection closed with uncommitted transaction (started at line {})",
+                    transaction_started_line
+                )
             }
             DatabaseViolation::ConnectionLeak { connect_line } => {
-                write!(f, "Connection opened at line {} may not be closed", connect_line)
+                write!(
+                    f,
+                    "Connection opened at line {} may not be closed",
+                    connect_line
+                )
             }
-            DatabaseViolation::NestedTransaction { outer_transaction_line } => {
-                write!(f, "Cannot start nested transaction (outer transaction at line {})", outer_transaction_line)
+            DatabaseViolation::NestedTransaction {
+                outer_transaction_line,
+            } => {
+                write!(
+                    f,
+                    "Cannot start nested transaction (outer transaction at line {})",
+                    outer_transaction_line
+                )
             }
             DatabaseViolation::QueryAfterClose { close_line } => {
-                write!(f, "Query executed after connection was closed at line {}", close_line)
+                write!(
+                    f,
+                    "Query executed after connection was closed at line {}",
+                    close_line
+                )
             }
             DatabaseViolation::DoubleClose { first_close_line } => {
                 write!(f, "Connection already closed at line {}", first_close_line)
@@ -2589,48 +2824,63 @@ impl DatabaseStateMachine {
         Self {
             connect_patterns: vec![
                 // Node.js mysql/mysql2
-                "createConnection(", "createPool(", ".getConnection(",
+                "createConnection(",
+                "createPool(",
+                ".getConnection(",
                 // Node.js pg (postgres)
-                "new Client(", "new Pool(", ".connect(",
+                "new Client(",
+                "new Pool(",
+                ".connect(",
                 // MongoDB
-                "MongoClient.connect(", "mongoose.connect(",
+                "MongoClient.connect(",
+                "mongoose.connect(",
                 // Sequelize ORM
-                "new Sequelize(", "sequelize.authenticate(",
+                "new Sequelize(",
+                "sequelize.authenticate(",
                 // Prisma
                 "new PrismaClient(",
                 // Generic
-                "createClient(", "getConnection(",
+                "createClient(",
+                "getConnection(",
             ],
             query_patterns: vec![
-                ".query(", ".execute(", ".run(",
-                ".find(", ".findOne(", ".findMany(",
-                ".insertOne(", ".updateOne(", ".deleteOne(",
-                ".aggregate(", ".exec(",
+                ".query(",
+                ".execute(",
+                ".run(",
+                ".find(",
+                ".findOne(",
+                ".findMany(",
+                ".insertOne(",
+                ".updateOne(",
+                ".deleteOne(",
+                ".aggregate(",
+                ".exec(",
                 // Sequelize
-                ".findAll(", ".create(", ".update(", ".destroy(",
+                ".findAll(",
+                ".create(",
+                ".update(",
+                ".destroy(",
                 // Prisma
-                ".$queryRaw(", ".$executeRaw(",
+                ".$queryRaw(",
+                ".$executeRaw(",
             ],
             begin_patterns: vec![
-                ".beginTransaction(", ".begin(", ".startTransaction(",
+                ".beginTransaction(",
+                ".begin(",
+                ".startTransaction(",
                 // Sequelize
                 "sequelize.transaction(",
                 // Prisma
                 ".$transaction(",
             ],
-            commit_patterns: vec![
-                ".commit(",
-            ],
-            rollback_patterns: vec![
-                ".rollback(", ".abortTransaction(",
-            ],
-            close_patterns: vec![
-                ".close(", ".end(", ".destroy(", ".disconnect(",
-                ".release(",
-            ],
+            commit_patterns: vec![".commit("],
+            rollback_patterns: vec![".rollback(", ".abortTransaction("],
+            close_patterns: vec![".close(", ".end(", ".destroy(", ".disconnect(", ".release("],
             safe_patterns: vec![
                 // Promise-based transaction patterns
-                ".transaction(async", "transaction((", ".transaction(t =>",
+                ".transaction(async",
+                "transaction((",
+                ".transaction(t =>",
                 // Auto-release pool patterns
                 "pool.query(",
             ],
@@ -2642,39 +2892,50 @@ impl DatabaseStateMachine {
         Self {
             connect_patterns: vec![
                 // Standard DB-API
-                ".connect(", "psycopg2.connect(", "mysql.connector.connect(",
-                "sqlite3.connect(", "pymysql.connect(",
+                ".connect(",
+                "psycopg2.connect(",
+                "mysql.connector.connect(",
+                "sqlite3.connect(",
+                "pymysql.connect(",
                 // SQLAlchemy
-                "create_engine(", "sessionmaker(", "Session(",
+                "create_engine(",
+                "sessionmaker(",
+                "Session(",
                 "scoped_session(",
                 // asyncpg
-                "asyncpg.connect(", "asyncpg.create_pool(",
+                "asyncpg.connect(",
+                "asyncpg.create_pool(",
                 // MongoDB
-                "MongoClient(", "motor.motor_asyncio.AsyncIOMotorClient(",
+                "MongoClient(",
+                "motor.motor_asyncio.AsyncIOMotorClient(",
             ],
             query_patterns: vec![
-                ".execute(", ".executemany(", ".cursor(",
-                ".fetchone(", ".fetchall(", ".fetchmany(",
+                ".execute(",
+                ".executemany(",
+                ".cursor(",
+                ".fetchone(",
+                ".fetchall(",
+                ".fetchmany(",
                 // SQLAlchemy
-                ".query(", ".add(", ".delete(", ".filter(",
-                ".scalar(", ".all(", ".first(",
+                ".query(",
+                ".add(",
+                ".delete(",
+                ".filter(",
+                ".scalar(",
+                ".all(",
+                ".first(",
             ],
-            begin_patterns: vec![
-                ".begin(", ".begin_nested(",
-            ],
-            commit_patterns: vec![
-                ".commit(",
-            ],
-            rollback_patterns: vec![
-                ".rollback(",
-            ],
-            close_patterns: vec![
-                ".close(", ".dispose(",
-            ],
+            begin_patterns: vec![".begin(", ".begin_nested("],
+            commit_patterns: vec![".commit("],
+            rollback_patterns: vec![".rollback("],
+            close_patterns: vec![".close(", ".dispose("],
             safe_patterns: vec![
                 // Context managers
-                "with engine.connect()", "with Session(", "with session:",
-                "with connection:", "async with",
+                "with engine.connect()",
+                "with Session(",
+                "with session:",
+                "with connection:",
+                "async with",
                 // SQLAlchemy session scope
                 "session_scope(",
             ],
@@ -2686,38 +2947,48 @@ impl DatabaseStateMachine {
         Self {
             connect_patterns: vec![
                 // Standard library
-                "sql.Open(", "sqlx.Open(", "sqlx.Connect(",
+                "sql.Open(",
+                "sqlx.Open(",
+                "sqlx.Connect(",
                 // GORM
-                "gorm.Open(", "db.Open(",
+                "gorm.Open(",
+                "db.Open(",
                 // MongoDB
-                "mongo.Connect(", "mongo.NewClient(",
+                "mongo.Connect(",
+                "mongo.NewClient(",
             ],
             query_patterns: vec![
                 // Standard library
-                ".Query(", ".QueryRow(", ".QueryContext(",
-                ".Exec(", ".ExecContext(",
-                ".Prepare(", ".PrepareContext(",
+                ".Query(",
+                ".QueryRow(",
+                ".QueryContext(",
+                ".Exec(",
+                ".ExecContext(",
+                ".Prepare(",
+                ".PrepareContext(",
                 // GORM
-                ".Find(", ".First(", ".Create(", ".Save(",
-                ".Update(", ".Delete(", ".Where(", ".Raw(",
+                ".Find(",
+                ".First(",
+                ".Create(",
+                ".Save(",
+                ".Update(",
+                ".Delete(",
+                ".Where(",
+                ".Raw(",
             ],
             begin_patterns: vec![
-                ".Begin(", ".BeginTx(",
+                ".Begin(",
+                ".BeginTx(",
                 // GORM
                 ".Transaction(",
             ],
-            commit_patterns: vec![
-                ".Commit(",
-            ],
-            rollback_patterns: vec![
-                ".Rollback(",
-            ],
-            close_patterns: vec![
-                ".Close(",
-            ],
+            commit_patterns: vec![".Commit("],
+            rollback_patterns: vec![".Rollback("],
+            close_patterns: vec![".Close("],
             safe_patterns: vec![
                 // Deferred close
-                "defer db.Close()", "defer conn.Close()",
+                "defer db.Close()",
+                "defer conn.Close()",
                 "defer tx.Rollback()",
                 // GORM transaction callback
                 ".Transaction(func(",
@@ -2730,42 +3001,52 @@ impl DatabaseStateMachine {
         Self {
             connect_patterns: vec![
                 // JDBC
-                "DriverManager.getConnection(", "DataSource.getConnection(",
+                "DriverManager.getConnection(",
+                "DataSource.getConnection(",
                 ".getConnection(",
                 // JPA/Hibernate
                 "EntityManagerFactory.createEntityManager(",
-                "sessionFactory.openSession(", "sessionFactory.getCurrentSession(",
+                "sessionFactory.openSession(",
+                "sessionFactory.getCurrentSession(",
                 // Spring
-                "JdbcTemplate(", "NamedParameterJdbcTemplate(",
+                "JdbcTemplate(",
+                "NamedParameterJdbcTemplate(",
             ],
             query_patterns: vec![
                 // JDBC
-                ".executeQuery(", ".executeUpdate(", ".execute(",
-                ".prepareStatement(", ".prepareCall(",
+                ".executeQuery(",
+                ".executeUpdate(",
+                ".execute(",
+                ".prepareStatement(",
+                ".prepareCall(",
                 // JPA/Hibernate
-                ".createQuery(", ".createNativeQuery(",
-                ".find(", ".persist(", ".merge(", ".remove(",
-                ".getResultList(", ".getSingleResult(",
+                ".createQuery(",
+                ".createNativeQuery(",
+                ".find(",
+                ".persist(",
+                ".merge(",
+                ".remove(",
+                ".getResultList(",
+                ".getSingleResult(",
                 // Spring JdbcTemplate
-                ".queryForObject(", ".queryForList(", ".update(",
+                ".queryForObject(",
+                ".queryForList(",
+                ".update(",
             ],
             begin_patterns: vec![
-                ".setAutoCommit(false)", ".beginTransaction(",
+                ".setAutoCommit(false)",
+                ".beginTransaction(",
                 ".getTransaction().begin(",
             ],
-            commit_patterns: vec![
-                ".commit()",
-            ],
-            rollback_patterns: vec![
-                ".rollback()",
-            ],
-            close_patterns: vec![
-                ".close(",
-            ],
+            commit_patterns: vec![".commit()"],
+            rollback_patterns: vec![".rollback()"],
+            close_patterns: vec![".close("],
             safe_patterns: vec![
                 // Try-with-resources
-                "try (Connection", "try (PreparedStatement",
-                "try (ResultSet", "try (Session",
+                "try (Connection",
+                "try (PreparedStatement",
+                "try (ResultSet",
+                "try (Session",
                 // Spring @Transactional
                 "@Transactional",
                 // JPA transaction management
@@ -2779,45 +3060,53 @@ impl DatabaseStateMachine {
         Self {
             connect_patterns: vec![
                 // sqlx
-                "Pool::connect(", "PgPool::connect(", "MySqlPool::connect(",
+                "Pool::connect(",
+                "PgPool::connect(",
+                "MySqlPool::connect(",
                 "SqlitePool::connect(",
                 // diesel
-                "establish_connection(", "PgConnection::establish(",
-                "MysqlConnection::establish(", "SqliteConnection::establish(",
+                "establish_connection(",
+                "PgConnection::establish(",
+                "MysqlConnection::establish(",
+                "SqliteConnection::establish(",
                 // tokio-postgres
-                "connect(", "Client::connect(",
+                "connect(",
+                "Client::connect(",
                 // mongodb
                 "Client::with_uri_str(",
             ],
             query_patterns: vec![
                 // sqlx
-                ".fetch_one(", ".fetch_all(", ".fetch_optional(",
-                ".execute(", "sqlx::query(",
+                ".fetch_one(",
+                ".fetch_all(",
+                ".fetch_optional(",
+                ".execute(",
+                "sqlx::query(",
                 // diesel
-                ".load::<", ".get_result(", ".first::<",
-                "diesel::insert_into(", "diesel::update(", "diesel::delete(",
+                ".load::<",
+                ".get_result(",
+                ".first::<",
+                "diesel::insert_into(",
+                "diesel::update(",
+                "diesel::delete(",
                 // General
-                ".query(", ".batch_execute(",
+                ".query(",
+                ".batch_execute(",
             ],
-            begin_patterns: vec![
-                ".begin()", ".transaction(",
-                "conn.transaction(",
-            ],
-            commit_patterns: vec![
-                ".commit()",
-            ],
-            rollback_patterns: vec![
-                ".rollback(",
-            ],
+            begin_patterns: vec![".begin()", ".transaction(", "conn.transaction("],
+            commit_patterns: vec![".commit()"],
+            rollback_patterns: vec![".rollback("],
             close_patterns: vec![
                 // Rust uses Drop, but explicit close exists
                 ".close()", "drop(",
             ],
             safe_patterns: vec![
                 // RAII - Drop handles cleanup
-                "Pool<", "PoolConnection<",
+                "Pool<",
+                "PoolConnection<",
                 // Transaction closures
-                ".transaction(|", ".transaction(async |",
+                ".transaction(|",
+                ".transaction(async |",
                 // Scoped connections
                 "web::Data<Pool",
             ],
@@ -2893,27 +3182,36 @@ impl DatabaseStateMachine {
 
     /// Apply a state transition and return the new state or a violation
     #[allow(dead_code)]
-    pub fn transition(&self, current: DatabaseState, action: DatabaseAction, _code: &str)
-        -> Result<DatabaseState, DatabaseViolation>
-    {
+    pub fn transition(
+        &self,
+        current: DatabaseState,
+        action: DatabaseAction,
+        _code: &str,
+    ) -> Result<DatabaseState, DatabaseViolation> {
         match (current, action) {
             // Connect transitions
             (DatabaseState::Disconnected, DatabaseAction::Connect) => Ok(DatabaseState::Connected),
             (DatabaseState::Closed, DatabaseAction::Connect) => Ok(DatabaseState::Connected),
 
             // Begin transaction
-            (DatabaseState::Connected, DatabaseAction::BeginTransaction) => Ok(DatabaseState::InTransaction),
+            (DatabaseState::Connected, DatabaseAction::BeginTransaction) => {
+                Ok(DatabaseState::InTransaction)
+            }
             (DatabaseState::InTransaction, DatabaseAction::BeginTransaction) => {
-                Err(DatabaseViolation::NestedTransaction { outer_transaction_line: 0 })
+                Err(DatabaseViolation::NestedTransaction {
+                    outer_transaction_line: 0,
+                })
             }
 
             // Query operations
             (DatabaseState::Connected, DatabaseAction::Query) => Ok(DatabaseState::Connected),
-            (DatabaseState::InTransaction, DatabaseAction::Query) => Ok(DatabaseState::InTransaction),
+            (DatabaseState::InTransaction, DatabaseAction::Query) => {
+                Ok(DatabaseState::InTransaction)
+            }
             (DatabaseState::Disconnected, DatabaseAction::Query) => {
                 Err(DatabaseViolation::UseInErrorState {
                     action,
-                    current_state: current
+                    current_state: current,
                 })
             }
             (DatabaseState::Closed, DatabaseAction::Query) => {
@@ -2922,12 +3220,12 @@ impl DatabaseStateMachine {
 
             // Commit
             (DatabaseState::InTransaction, DatabaseAction::Commit) => Ok(DatabaseState::Connected),
-            (_, DatabaseAction::Commit) => {
-                Err(DatabaseViolation::InvalidTransactionOp { action })
-            }
+            (_, DatabaseAction::Commit) => Err(DatabaseViolation::InvalidTransactionOp { action }),
 
             // Rollback
-            (DatabaseState::InTransaction, DatabaseAction::Rollback) => Ok(DatabaseState::Connected),
+            (DatabaseState::InTransaction, DatabaseAction::Rollback) => {
+                Ok(DatabaseState::Connected)
+            }
             (_, DatabaseAction::Rollback) => {
                 Err(DatabaseViolation::InvalidTransactionOp { action })
             }
@@ -2935,17 +3233,20 @@ impl DatabaseStateMachine {
             // Close
             (DatabaseState::Connected, DatabaseAction::Close) => Ok(DatabaseState::Closed),
             (DatabaseState::InTransaction, DatabaseAction::Close) => {
-                Err(DatabaseViolation::UncommittedTransaction { transaction_started_line: 0 })
+                Err(DatabaseViolation::UncommittedTransaction {
+                    transaction_started_line: 0,
+                })
             }
-            (DatabaseState::Closed, DatabaseAction::Close) => {
-                Err(DatabaseViolation::DoubleClose { first_close_line: 0 })
-            }
+            (DatabaseState::Closed, DatabaseAction::Close) => Err(DatabaseViolation::DoubleClose {
+                first_close_line: 0,
+            }),
             (DatabaseState::Disconnected, DatabaseAction::Close) => Ok(DatabaseState::Closed),
 
             // Error state - most operations fail
-            (DatabaseState::Error, action) => {
-                Err(DatabaseViolation::UseInErrorState { action, current_state: current })
-            }
+            (DatabaseState::Error, action) => Err(DatabaseViolation::UseInErrorState {
+                action,
+                current_state: current,
+            }),
 
             // Default: stay in current state
             _ => Ok(current),
@@ -3001,7 +3302,10 @@ impl DatabaseTypestateRule {
         path: &std::path::Path,
         language: Language,
     ) -> Option<Finding> {
-        if conn.state == DatabaseState::Connected && conn.close_line.is_none() && !conn.in_safe_context {
+        if conn.state == DatabaseState::Connected
+            && conn.close_line.is_none()
+            && !conn.in_safe_context
+        {
             let mut finding = create_finding_at_line(
                 "generic/database-typestate",
                 path,
@@ -3013,9 +3317,14 @@ impl DatabaseTypestateRule {
             );
             finding.confidence = Confidence::Medium;
             finding.suggestion = Some(match language {
-                Language::Python => "Use 'with' context manager or ensure connection.close() is called".to_string(),
+                Language::Python => {
+                    "Use 'with' context manager or ensure connection.close() is called".to_string()
+                }
                 Language::Go => "Use 'defer conn.Close()' after opening connection".to_string(),
-                Language::Java => "Use try-with-resources or ensure connection.close() in finally block".to_string(),
+                Language::Java => {
+                    "Use try-with-resources or ensure connection.close() in finally block"
+                        .to_string()
+                }
                 Language::Rust => "Use connection pools or ensure proper Drop handling".to_string(),
                 _ => "Ensure the connection is properly closed after use".to_string(),
             });
@@ -3119,12 +3428,17 @@ impl Rule for DatabaseTypestateRule {
                             );
                             finding.confidence = Confidence::Medium;
                             finding.suggestion = Some(
-                                "Establish a database connection before executing queries.".to_string()
+                                "Establish a database connection before executing queries."
+                                    .to_string(),
                             );
                             findings.push(finding);
                         } else if !has_valid_conn {
                             // Find the most recently closed connection
-                            if let Some(conn) = connections.iter().rev().find(|c| c.state == DatabaseState::Closed) {
+                            if let Some(conn) = connections
+                                .iter()
+                                .rev()
+                                .find(|c| c.state == DatabaseState::Closed)
+                            {
                                 let mut finding = create_finding_at_line(
                                     self.id(),
                                     &parsed.path,
@@ -3225,9 +3539,8 @@ impl Rule for DatabaseTypestateRule {
                                     parsed.language,
                                 );
                                 finding.confidence = Confidence::Medium;
-                                finding.suggestion = Some(
-                                    "Remove duplicate close() call.".to_string()
-                                );
+                                finding.suggestion =
+                                    Some("Remove duplicate close() call.".to_string());
                                 findings.push(finding);
                             }
                             conn.state = DatabaseState::Closed;
@@ -3240,7 +3553,8 @@ impl Rule for DatabaseTypestateRule {
 
         // Check for connection leaks at end of file
         for conn in &connections {
-            if let Some(finding) = Self::check_connection_leak(conn, &parsed.path, parsed.language) {
+            if let Some(finding) = Self::check_connection_leak(conn, &parsed.path, parsed.language)
+            {
                 findings.push(finding);
             }
         }
@@ -3359,16 +3673,27 @@ impl IteratorStateMachine {
         match language {
             Language::JavaScript | Language::TypeScript => Self {
                 creation_patterns: vec![
-                    "[Symbol.iterator](", ".values()", ".keys()", ".entries()",
-                    "function*(", "yield ", ".matchAll(", "Object.keys(",
-                    "Object.values(", "Object.entries(",
+                    "[Symbol.iterator](",
+                    ".values()",
+                    ".keys()",
+                    ".entries()",
+                    "function*(",
+                    "yield ",
+                    ".matchAll(",
+                    "Object.keys(",
+                    "Object.values(",
+                    "Object.entries(",
                 ],
-                next_patterns: vec![
-                    ".next(",
-                ],
+                next_patterns: vec![".next("],
                 consume_patterns: vec![
-                    "for (", "for await", "Array.from(", "[...",
-                    ".forEach(", ".reduce(", ".map(", ".filter(",
+                    "for (",
+                    "for await",
+                    "Array.from(",
+                    "[...",
+                    ".forEach(",
+                    ".reduce(",
+                    ".map(",
+                    ".filter(",
                 ],
                 move_patterns: vec![],
                 close_patterns: vec![],
@@ -3376,73 +3701,87 @@ impl IteratorStateMachine {
             },
             Language::Python => Self {
                 creation_patterns: vec![
-                    "iter(", "__iter__", "yield ", "(x for", "[x for",
-                    "range(", "enumerate(", "zip(", "map(", "filter(",
+                    "iter(",
+                    "__iter__",
+                    "yield ",
+                    "(x for",
+                    "[x for",
+                    "range(",
+                    "enumerate(",
+                    "zip(",
+                    "map(",
+                    "filter(",
                 ],
-                next_patterns: vec![
-                    "next(", "__next__",
-                ],
+                next_patterns: vec!["next(", "__next__"],
                 consume_patterns: vec![
-                    "list(", "tuple(", "set(", "dict(", "sum(", "max(", "min(",
-                    "any(", "all(", ".join(",
+                    "list(", "tuple(", "set(", "dict(", "sum(", "max(", "min(", "any(", "all(",
+                    ".join(",
                 ],
                 move_patterns: vec![],
                 close_patterns: vec![],
                 stream_patterns: vec![],
             },
             Language::Go => Self {
-                creation_patterns: vec![
-                    "make(chan", "bufio.NewScanner(", "bufio.NewReader(",
-                ],
-                next_patterns: vec![
-                    "<-", ".Scan()", ".Read(", ".Next(",
-                ],
-                consume_patterns: vec![
-                    "for range",
-                ],
+                creation_patterns: vec!["make(chan", "bufio.NewScanner(", "bufio.NewReader("],
+                next_patterns: vec!["<-", ".Scan()", ".Read(", ".Next("],
+                consume_patterns: vec!["for range"],
                 move_patterns: vec![],
-                close_patterns: vec![
-                    "close(",
-                ],
+                close_patterns: vec!["close("],
                 stream_patterns: vec![],
             },
             Language::Rust => Self {
                 creation_patterns: vec![
-                    ".iter()", ".iter_mut()", ".chars()", ".bytes()", ".lines(",
-                    ".split(", ".enumerate()", ".zip(", ".map(", ".filter(",
+                    ".iter()",
+                    ".iter_mut()",
+                    ".chars()",
+                    ".bytes()",
+                    ".lines(",
+                    ".split(",
+                    ".enumerate()",
+                    ".zip(",
+                    ".map(",
+                    ".filter(",
                     ".peekable(",
                 ],
-                next_patterns: vec![
-                    ".next()", ".peek(",
-                ],
+                next_patterns: vec![".next()", ".peek("],
                 consume_patterns: vec![
-                    ".collect(", ".collect::", ".for_each(", ".count()", ".sum()", ".product(",
-                    ".fold(", ".reduce(", ".all(", ".any(", ".find(", ".max()",
-                    ".min(", ".last(",
+                    ".collect(",
+                    ".collect::",
+                    ".for_each(",
+                    ".count()",
+                    ".sum()",
+                    ".product(",
+                    ".fold(",
+                    ".reduce(",
+                    ".all(",
+                    ".any(",
+                    ".find(",
+                    ".max()",
+                    ".min(",
+                    ".last(",
                 ],
-                move_patterns: vec![
-                    ".into_iter()",
-                ],
+                move_patterns: vec![".into_iter()"],
                 close_patterns: vec![],
                 stream_patterns: vec![],
             },
             Language::Java => Self {
-                creation_patterns: vec![
-                    ".iterator()", "Iterator<",
-                ],
-                next_patterns: vec![
-                    ".next()", ".hasNext(",
-                ],
-                consume_patterns: vec![
-                    "for (", ".forEach(",
-                ],
+                creation_patterns: vec![".iterator()", "Iterator<"],
+                next_patterns: vec![".next()", ".hasNext("],
+                consume_patterns: vec!["for (", ".forEach("],
                 move_patterns: vec![],
                 close_patterns: vec![],
                 stream_patterns: vec![
-                    ".stream()", ".parallelStream()", "Stream.of(",
-                    "Stream.generate(", "Stream.iterate(", "IntStream.",
-                    "LongStream.", "DoubleStream.", "Arrays.stream(",
-                    "Files.lines(", "Files.list(",
+                    ".stream()",
+                    ".parallelStream()",
+                    "Stream.of(",
+                    "Stream.generate(",
+                    "Stream.iterate(",
+                    "IntStream.",
+                    "LongStream.",
+                    "DoubleStream.",
+                    "Arrays.stream(",
+                    "Files.lines(",
+                    "Files.list(",
                 ],
             },
             _ => Self {
@@ -3617,7 +3956,11 @@ impl Rule for IteratorTypestateRule {
             else if sm.is_creation(line_trimmed) || sm.is_move(line_trimmed) {
                 if let Some(var_name) = Self::extract_var_name(line_trimmed, parsed.language) {
                     let is_move = sm.is_move(line_trimmed);
-                    let initial_state = if is_move { IteratorState::Moved } else { IteratorState::Fresh };
+                    let initial_state = if is_move {
+                        IteratorState::Moved
+                    } else {
+                        IteratorState::Fresh
+                    };
                     iterator_states.insert(var_name, (initial_state, line_num, false));
                 }
             }
@@ -3654,9 +3997,15 @@ impl Rule for IteratorTypestateRule {
                                     // Continue consuming
                                 }
                                 IteratorState::Exhausted => {
-                                    let issue_type = if *is_stream { "stream_reuse" } else { "iterator_exhaustion" };
-                                    let severity = Self::determine_severity(parsed.language, issue_type);
-                                    let suggestion = Self::get_suggestion(parsed.language, issue_type);
+                                    let issue_type = if *is_stream {
+                                        "stream_reuse"
+                                    } else {
+                                        "iterator_exhaustion"
+                                    };
+                                    let severity =
+                                        Self::determine_severity(parsed.language, issue_type);
+                                    let suggestion =
+                                        Self::get_suggestion(parsed.language, issue_type);
 
                                     let mut finding = create_finding_at_line(
                                         self.id(),
@@ -3667,16 +4016,23 @@ impl Rule for IteratorTypestateRule {
                                         &format!(
                                             "{} '{}' already exhausted at line {}. {}",
                                             if *is_stream { "Stream" } else { "Iterator" },
-                                            var_name, *created_line, suggestion
+                                            var_name,
+                                            *created_line,
+                                            suggestion
                                         ),
                                         parsed.language,
                                     );
-                                    finding.confidence = if *is_stream { Confidence::High } else { Confidence::Medium };
+                                    finding.confidence = if *is_stream {
+                                        Confidence::High
+                                    } else {
+                                        Confidence::Medium
+                                    };
                                     finding.suggestion = Some(suggestion);
                                     findings.push(finding);
                                 }
                                 IteratorState::Moved => {
-                                    let suggestion = Self::get_suggestion(parsed.language, "iterator_moved");
+                                    let suggestion =
+                                        Self::get_suggestion(parsed.language, "iterator_moved");
                                     let mut finding = create_finding_at_line(
                                         self.id(),
                                         &parsed.path,
@@ -3694,7 +4050,8 @@ impl Rule for IteratorTypestateRule {
                                     findings.push(finding);
                                 }
                                 IteratorState::Closed => {
-                                    let suggestion = Self::get_suggestion(parsed.language, "channel_closed");
+                                    let suggestion =
+                                        Self::get_suggestion(parsed.language, "channel_closed");
                                     let mut finding = create_finding_at_line(
                                         self.id(),
                                         &parsed.path,
@@ -3722,7 +4079,8 @@ impl Rule for IteratorTypestateRule {
                                     IteratorState::Closed => "channel_closed",
                                     _ => "iterator_exhaustion",
                                 };
-                                let severity = Self::determine_severity(parsed.language, issue_type);
+                                let severity =
+                                    Self::determine_severity(parsed.language, issue_type);
                                 let suggestion = Self::get_suggestion(parsed.language, issue_type);
 
                                 let mut finding = create_finding_at_line(
@@ -3734,11 +4092,18 @@ impl Rule for IteratorTypestateRule {
                                     &format!(
                                         "{} '{}' already in {} state (from line {}). {}",
                                         if *is_stream { "Stream" } else { "Iterator" },
-                                        var_name, *state, *created_line, suggestion
+                                        var_name,
+                                        *state,
+                                        *created_line,
+                                        suggestion
                                     ),
                                     parsed.language,
                                 );
-                                finding.confidence = if *is_stream { Confidence::High } else { Confidence::Medium };
+                                finding.confidence = if *is_stream {
+                                    Confidence::High
+                                } else {
+                                    Confidence::Medium
+                                };
                                 finding.suggestion = Some(suggestion);
                                 findings.push(finding);
                             } else {
@@ -3784,7 +4149,11 @@ impl IteratorTypestateRule {
         if let Some(eq_pos) = line.find('=') {
             let before = line[..eq_pos].trim();
             // Skip compound assignments
-            if !before.ends_with('+') && !before.ends_with('-') && !before.ends_with('*') && !before.ends_with('/') {
+            if !before.ends_with('+')
+                && !before.ends_with('-')
+                && !before.ends_with('*')
+                && !before.ends_with('/')
+            {
                 let name = before.split_whitespace().last()?;
                 if name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                     return Some(name.to_string());
@@ -3838,8 +4207,14 @@ mod additional_tests {
     fn test_lock_state_machine_patterns() {
         let sm = LockStateMachine::for_language(Language::Go);
 
-        assert_eq!(sm.detect_operation("mutex.Lock()"), Some(LockOperation::Lock));
-        assert_eq!(sm.detect_operation("mutex.Unlock()"), Some(LockOperation::Unlock));
+        assert_eq!(
+            sm.detect_operation("mutex.Lock()"),
+            Some(LockOperation::Lock)
+        );
+        assert_eq!(
+            sm.detect_operation("mutex.Unlock()"),
+            Some(LockOperation::Unlock)
+        );
         assert!(sm.is_safe_context("defer m.Unlock()"));
     }
 
@@ -3869,7 +4244,10 @@ mod additional_tests {
         assert!(sm.is_finalize("cipher.doFinal(data)"));
 
         // Test hash creation
-        assert!(sm.is_creation("MessageDigest.getInstance(\"SHA-256\")").is_some());
+        assert!(
+            sm.is_creation("MessageDigest.getInstance(\"SHA-256\")")
+                .is_some()
+        );
         assert_eq!(
             sm.is_creation("MessageDigest.getInstance(\"SHA-256\")"),
             Some(CryptoObjectType::Hash)
@@ -3880,12 +4258,24 @@ mod additional_tests {
         assert!(sm.is_finalize("digest.digest()"));
 
         // Test weak algorithm detection
-        assert!(sm.uses_weak_algorithm("MessageDigest.getInstance(\"MD5\")").is_some());
-        assert!(sm.uses_weak_algorithm("MessageDigest.getInstance(\"SHA-256\")").is_none());
+        assert!(
+            sm.uses_weak_algorithm("MessageDigest.getInstance(\"MD5\")")
+                .is_some()
+        );
+        assert!(
+            sm.uses_weak_algorithm("MessageDigest.getInstance(\"SHA-256\")")
+                .is_none()
+        );
 
         // Test unsafe mode detection
-        assert!(sm.uses_unsafe_mode("Cipher.getInstance(\"AES/ECB/PKCS5Padding\")").is_some());
-        assert!(sm.uses_unsafe_mode("Cipher.getInstance(\"AES/GCM/NoPadding\")").is_none());
+        assert!(
+            sm.uses_unsafe_mode("Cipher.getInstance(\"AES/ECB/PKCS5Padding\")")
+                .is_some()
+        );
+        assert!(
+            sm.uses_unsafe_mode("Cipher.getInstance(\"AES/GCM/NoPadding\")")
+                .is_none()
+        );
     }
 
     #[test]
@@ -3933,7 +4323,10 @@ mod additional_tests {
     #[test]
     fn test_database_action_display() {
         assert_eq!(format!("{}", DatabaseAction::Connect), "connect");
-        assert_eq!(format!("{}", DatabaseAction::BeginTransaction), "begin transaction");
+        assert_eq!(
+            format!("{}", DatabaseAction::BeginTransaction),
+            "begin transaction"
+        );
         assert_eq!(format!("{}", DatabaseAction::Query), "query");
         assert_eq!(format!("{}", DatabaseAction::Commit), "commit");
         assert_eq!(format!("{}", DatabaseAction::Rollback), "rollback");
@@ -3945,10 +4338,14 @@ mod additional_tests {
         let violation = DatabaseViolation::ConnectionLeak { connect_line: 10 };
         assert!(format!("{}", violation).contains("line 10"));
 
-        let violation = DatabaseViolation::UncommittedTransaction { transaction_started_line: 5 };
+        let violation = DatabaseViolation::UncommittedTransaction {
+            transaction_started_line: 5,
+        };
         assert!(format!("{}", violation).contains("uncommitted transaction"));
 
-        let violation = DatabaseViolation::NestedTransaction { outer_transaction_line: 3 };
+        let violation = DatabaseViolation::NestedTransaction {
+            outer_transaction_line: 3,
+        };
         assert!(format!("{}", violation).contains("nested transaction"));
     }
 
@@ -4047,12 +4444,30 @@ mod additional_tests {
     fn test_database_detect_action() {
         let sm = DatabaseStateMachine::for_language(Language::Python);
 
-        assert_eq!(sm.detect_action("conn = psycopg2.connect('...')"), Some(DatabaseAction::Connect));
-        assert_eq!(sm.detect_action("session.begin()"), Some(DatabaseAction::BeginTransaction));
-        assert_eq!(sm.detect_action("cursor.execute('SELECT * FROM t')"), Some(DatabaseAction::Query));
-        assert_eq!(sm.detect_action("session.commit()"), Some(DatabaseAction::Commit));
-        assert_eq!(sm.detect_action("session.rollback()"), Some(DatabaseAction::Rollback));
-        assert_eq!(sm.detect_action("conn.close()"), Some(DatabaseAction::Close));
+        assert_eq!(
+            sm.detect_action("conn = psycopg2.connect('...')"),
+            Some(DatabaseAction::Connect)
+        );
+        assert_eq!(
+            sm.detect_action("session.begin()"),
+            Some(DatabaseAction::BeginTransaction)
+        );
+        assert_eq!(
+            sm.detect_action("cursor.execute('SELECT * FROM t')"),
+            Some(DatabaseAction::Query)
+        );
+        assert_eq!(
+            sm.detect_action("session.commit()"),
+            Some(DatabaseAction::Commit)
+        );
+        assert_eq!(
+            sm.detect_action("session.rollback()"),
+            Some(DatabaseAction::Rollback)
+        );
+        assert_eq!(
+            sm.detect_action("conn.close()"),
+            Some(DatabaseAction::Close)
+        );
         assert_eq!(sm.detect_action("x = 1"), None);
     }
 
@@ -4061,16 +4476,48 @@ mod additional_tests {
         let sm = DatabaseStateMachine::for_language(Language::Python);
 
         // Valid transitions
-        assert!(sm.transition(DatabaseState::Disconnected, DatabaseAction::Connect, "").is_ok());
-        assert!(sm.transition(DatabaseState::Connected, DatabaseAction::BeginTransaction, "").is_ok());
-        assert!(sm.transition(DatabaseState::InTransaction, DatabaseAction::Query, "").is_ok());
-        assert!(sm.transition(DatabaseState::InTransaction, DatabaseAction::Commit, "").is_ok());
-        assert!(sm.transition(DatabaseState::Connected, DatabaseAction::Close, "").is_ok());
+        assert!(
+            sm.transition(DatabaseState::Disconnected, DatabaseAction::Connect, "")
+                .is_ok()
+        );
+        assert!(
+            sm.transition(
+                DatabaseState::Connected,
+                DatabaseAction::BeginTransaction,
+                ""
+            )
+            .is_ok()
+        );
+        assert!(
+            sm.transition(DatabaseState::InTransaction, DatabaseAction::Query, "")
+                .is_ok()
+        );
+        assert!(
+            sm.transition(DatabaseState::InTransaction, DatabaseAction::Commit, "")
+                .is_ok()
+        );
+        assert!(
+            sm.transition(DatabaseState::Connected, DatabaseAction::Close, "")
+                .is_ok()
+        );
 
         // Invalid transitions
-        assert!(sm.transition(DatabaseState::Disconnected, DatabaseAction::Query, "").is_err());
-        assert!(sm.transition(DatabaseState::Connected, DatabaseAction::Commit, "").is_err());
-        assert!(sm.transition(DatabaseState::InTransaction, DatabaseAction::BeginTransaction, "").is_err());
+        assert!(
+            sm.transition(DatabaseState::Disconnected, DatabaseAction::Query, "")
+                .is_err()
+        );
+        assert!(
+            sm.transition(DatabaseState::Connected, DatabaseAction::Commit, "")
+                .is_err()
+        );
+        assert!(
+            sm.transition(
+                DatabaseState::InTransaction,
+                DatabaseAction::BeginTransaction,
+                ""
+            )
+            .is_err()
+        );
     }
 
     #[test]
