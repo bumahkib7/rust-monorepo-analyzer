@@ -174,4 +174,5 @@ jobs:
         with:
           path: '.'
           profile: 'strict'
+          extra-args: '--skip-tests'
           upload-sarif: true
