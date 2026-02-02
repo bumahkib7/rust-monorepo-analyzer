@@ -5,7 +5,7 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
-  workflow_dispatch:  # Allow manual triggers
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,28 +19,55 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Download RMA binary
+        run: |
+          # Get latest release or fallback to building
+          LATEST=$(curl -s https://api.github.com/repos/bumahkib7/rust-monorepo-analyzer/releases/latest | jq -r '.tag_name // empty')
+
+          if [ -n "$LATEST" ]; then
+            echo "Downloading RMA $LATEST..."
+            curl -sL "https://github.com/bumahkib7/rust-monorepo-analyzer/releases/download/${LATEST}/rma-x86_64-unknown-linux-gnu.tar.gz" | tar -xz
+            chmod +x rma
+            ./rma --version
+          else
+            echo "No release found, will build from source"
+            echo "BUILD_FROM_SOURCE=true" >> $GITHUB_ENV
+          fi
+
+      - name: Install Rust (if needed)
+        if: env.BUILD_FROM_SOURCE == 'true'
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build RMA
-        run: cargo build --release --package rma-cli
+      - name: Cache cargo (if building)
+        if: env.BUILD_FROM_SOURCE == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: rma-scan-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build RMA (if needed)
+        if: env.BUILD_FROM_SOURCE == 'true'
+        run: |
+          cargo build --release --package rma-cli
+          cp target/release/rma ./rma
 
       - name: Run RMA scan
         id: scan
         run: |
-          ./target/release/rma scan . \
+          ./rma scan . \
             --format sarif \
             --output rma-results.sarif \
             --severity info \
             2>&1 || true
 
-          # Output scan summary
-          echo "Scan complete. SARIF file generated."
+          echo "Scan complete."
 
-          # Check if SARIF was created
           if [ -f rma-results.sarif ]; then
             echo "sarif-file=rma-results.sarif" >> "$GITHUB_OUTPUT"
-            # Show scan stats from SARIF
             jq -r '.runs[0].invocations[0].properties.metrics // "No metrics"' rma-results.sarif || true
           fi
 
