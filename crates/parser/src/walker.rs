@@ -49,11 +49,10 @@ pub fn collect_files(root: &Path, config: &RmaConfig) -> Result<Vec<PathBuf>> {
 
         // Check exclude patterns
         let path_str = path.to_string_lossy();
-        let excluded = config.exclude_patterns.iter().any(|pattern| {
-            glob::Pattern::new(pattern)
-                .map(|p| p.matches(&path_str))
-                .unwrap_or(false)
-        });
+        let excluded = config
+            .exclude_patterns
+            .iter()
+            .any(|pattern| matches_exclude(pattern, &path_str));
 
         if excluded {
             debug!("Excluded by pattern: {}", path.display());
@@ -72,11 +71,46 @@ pub fn collect_files(root: &Path, config: &RmaConfig) -> Result<Vec<PathBuf>> {
 /// Check if a path should be excluded based on patterns
 pub fn is_excluded(path: &Path, patterns: &[String]) -> bool {
     let path_str = path.to_string_lossy();
-    patterns.iter().any(|pattern| {
-        glob::Pattern::new(pattern)
-            .map(|p| p.matches(&path_str))
-            .unwrap_or(false)
-    })
+    patterns
+        .iter()
+        .any(|pattern| matches_exclude(pattern, &path_str))
+}
+
+/// Match an exclude pattern against a path string.
+///
+/// Supports `**` for recursive directory matching (which `glob::Pattern` does not).
+/// Patterns like `foo/**` become a prefix check on `foo/`.
+/// Patterns like `**/foo` become a suffix/contains check on `/foo`.
+fn matches_exclude(pattern: &str, path: &str) -> bool {
+    if pattern.contains("**") {
+        // "dir/**" → anything under dir/
+        if let Some(prefix) = pattern.strip_suffix("/**") {
+            return path.contains(&format!("{prefix}/"));
+        }
+        // "**/suffix" → anything ending with /suffix or matching suffix
+        if let Some(suffix) = pattern.strip_prefix("**/") {
+            return path.ends_with(suffix) || path.contains(&format!("/{suffix}"));
+        }
+        // General ** — split and check segments
+        let parts: Vec<&str> = pattern.split("**").collect();
+        if parts.len() == 2 {
+            return path.contains(parts[0]) && path.contains(parts[1]);
+        }
+    }
+
+    // Fall back to glob::Pattern for simple patterns
+    glob::Pattern::new(pattern)
+        .map(|p| {
+            p.matches_with(
+                path,
+                glob::MatchOptions {
+                    case_sensitive: true,
+                    require_literal_separator: false,
+                    require_literal_leading_dot: false,
+                },
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// Get language stats from a list of files
