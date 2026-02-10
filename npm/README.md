@@ -5,7 +5,7 @@ Ultra-fast Rust-native code intelligence and security analysis platform for larg
 ## Installation
 
 ```bash
-npm install -g rma-cli
+npm install -g qryon
 ```
 
 ## Usage
@@ -30,7 +30,7 @@ If npm installation fails, try:
 
 ```bash
 # Cargo (requires Rust)
-cargo install rma-cli
+cargo install qryon
 
 # Shell script (Linux/macOS)
 curl -fsSL https://raw.githubusercontent.com/bumahkib7/qryon/master/install.sh | bash

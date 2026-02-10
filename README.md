@@ -5,7 +5,7 @@
 **Find security vulnerabilities in seconds, not minutes.**
 
 [![CI](https://github.com/bumahkib7/qryon/actions/workflows/ci.yml/badge.svg)](https://github.com/bumahkib7/qryon/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/rma-cli)](https://www.npmjs.com/package/rma-cli)
+[![npm](https://img.shields.io/npm/v/qryon)](https://www.npmjs.com/package/qryon)
 [![crates.io](https://img.shields.io/crates/v/rma-cli.svg)](https://crates.io/crates/rma-cli)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
@@ -13,7 +13,7 @@
 
 ```bash
 # Install in 10 seconds
-npm install -g rma-cli
+npm install -g qryon
 
 # Find vulnerabilities instantly
 qryon scan .
@@ -31,7 +31,7 @@ qryon scan .
 |---------|:---:|:-----------:|:------:|
 | **Scan 1M lines** | 45s | 8+ min | 15+ min |
 | **Languages** | 28 | 30+ | 12 |
-| **Setup** | `npm i -g rma-cli` | Docker/pip | Complex |
+| **Setup** | `npm i -g qryon` | Docker/pip | Complex |
 | **Rules** | 647+ | 2500+ | Varies |
 | **Cross-file taint** | Yes | Pro only | Yes |
 | **Single binary** | Yes | No | No |
@@ -67,7 +67,7 @@ brew tap bumahkib7/tap && brew install qryon
 
 **Cargo (Rust):**
 ```bash
-cargo install rma-cli
+cargo install qryon
 ```
 
 **Docker:**
@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/bumahkib7/qryon/master/install.sh |
 
 **GitHub Actions:**
 ```yaml
-- uses: bumahkib7/qryon@v0.16.0
+- uses: bumahkib7/qryon@v0.19.1
   with:
     path: '.'
     upload-sarif: true
@@ -159,7 +159,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: bumahkib7/qryon@v0.16.0
+      - uses: bumahkib7/qryon@v0.19.1
         with:
           path: '.'
           upload-sarif: true

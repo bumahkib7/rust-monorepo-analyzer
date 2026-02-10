@@ -35,6 +35,12 @@ This will:
 
 ## Alternative Methods
 
+### npm (cross-platform)
+
+```bash
+npm install -g qryon
+```
+
 ### Cargo (from crates.io)
 
 If you have Rust installed:
@@ -119,7 +125,7 @@ qryon --version
 
 Expected output:
 ```
-rma-cli 0.1.0
+qryon 0.19.1
 ```
 
 ## Shell Completions
@@ -155,6 +161,8 @@ curl -fsSL https://raw.githubusercontent.com/bumahkib7/qryon/master/install.sh |
 
 ```bash
 cargo install rma-cli --force
+# Or via npm:
+npm install -g qryon@latest
 ```
 
 ### Docker
