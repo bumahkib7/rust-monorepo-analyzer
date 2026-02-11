@@ -128,25 +128,25 @@ impl SnippetContext {
     /// Get the maximum character limit for this context
     pub fn char_limit(&self) -> usize {
         match self {
-            Self::SingleLine => 200,
-            Self::Expression => 300,
-            Self::Statement => 400,
-            Self::Block => 800,
-            Self::Function => 1200,
+            Self::SingleLine => 500,
+            Self::Expression => 600,
+            Self::Statement => 800,
+            Self::Block => 1500,
+            Self::Function => 2000,
             Self::TaintFlow {
                 source_line,
                 sink_line,
             } => {
                 // Scale based on distance
                 let distance = sink_line.saturating_sub(*source_line);
-                (300 + distance * 50).min(1500)
+                (500 + distance * 80).min(2500)
             }
             Self::MultiLine {
                 start_line,
                 end_line,
             } => {
                 let lines = end_line.saturating_sub(*start_line) + 1;
-                (lines * 100).clamp(200, 1000)
+                (lines * 150).clamp(400, 2000)
             }
         }
     }
@@ -154,13 +154,13 @@ impl SnippetContext {
     /// Get the number of context lines to show before/after
     pub fn context_lines(&self) -> usize {
         match self {
-            Self::SingleLine => 0,
-            Self::Expression => 1,
-            Self::Statement => 1,
-            Self::Block => 2,
-            Self::Function => 3,
-            Self::TaintFlow { .. } => 2,
-            Self::MultiLine { .. } => 1,
+            Self::SingleLine => 2,
+            Self::Expression => 3,
+            Self::Statement => 3,
+            Self::Block => 4,
+            Self::Function => 5,
+            Self::TaintFlow { .. } => 4,
+            Self::MultiLine { .. } => 3,
         }
     }
 }

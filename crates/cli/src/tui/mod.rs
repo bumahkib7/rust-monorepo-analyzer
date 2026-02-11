@@ -1660,19 +1660,30 @@ impl TuiApp {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )));
-            for (i, code_line) in snippet.lines().enumerate() {
-                let line_num = finding.location.start_line + i;
-                let is_target_line = i == 0; // First line is the finding line
-                let line_style = if is_target_line {
+            let snippet_lines: Vec<&str> = snippet.lines().collect();
+            let total_lines = snippet_lines.len();
+            let finding_span = finding.location.end_line.saturating_sub(finding.location.start_line) + 1;
+            // Estimate which line number the snippet starts at
+            let first_line_num = if total_lines > finding_span {
+                finding.location.start_line.saturating_sub((total_lines - finding_span) / 2)
+            } else {
+                finding.location.start_line
+            };
+
+            for (i, code_line) in snippet_lines.iter().enumerate() {
+                let line_num = first_line_num + i;
+                let is_target = line_num >= finding.location.start_line
+                    && line_num <= finding.location.end_line;
+                let line_style = if is_target {
                     Style::default()
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                let prefix = if is_target_line { ">> " } else { "   " };
+                let prefix = if is_target { ">> " } else { "   " };
                 lines.push(Line::from(Span::styled(
-                    format!("{}{:4} │ {}", prefix, line_num, code_line),
+                    format!("{}{:4} \u{2502} {}", prefix, line_num, code_line),
                     line_style,
                 )));
             }

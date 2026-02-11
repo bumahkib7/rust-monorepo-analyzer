@@ -14,17 +14,17 @@ RUN useradd -m -u 1000 rma
 
 # Copy pre-built binary based on architecture
 ARG TARGETARCH
-COPY binaries/${TARGETARCH}/rma /usr/local/bin/rma
+COPY binaries/${TARGETARCH}/qryon /usr/local/bin/qryon
 
 # Set permissions
-RUN chmod +x /usr/local/bin/rma && chown rma:rma /usr/local/bin/rma
+RUN chmod +x /usr/local/bin/qryon && chown rma:rma /usr/local/bin/qryon
 
 # Switch to non-root user
 USER rma
 WORKDIR /workspace
 
 # Default command
-ENTRYPOINT ["rma"]
+ENTRYPOINT ["qryon"]
 CMD ["--help"]
 
 # Labels

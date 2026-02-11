@@ -444,6 +444,8 @@ fn print_finding_line(finding: &Finding) {
         finding.rule_id.dimmed(),
         truncate(&finding.message, 50)
     );
+
+    print_snippet(finding);
 }
 
 /// Print a finding with file path
@@ -462,6 +464,53 @@ fn print_finding_with_file(result: &FileAnalysis, finding: &Finding) {
         finding.rule_id.cyan(),
         truncate(&finding.message, 40)
     );
+
+    print_snippet(finding);
+}
+
+/// Print a code snippet under a finding line
+fn print_snippet(finding: &Finding) {
+    if let Some(ref snippet) = finding.snippet {
+        let lines: Vec<&str> = snippet.lines().collect();
+        let total = lines.len();
+        let finding_span = finding.location.end_line.saturating_sub(finding.location.start_line) + 1;
+        // Estimate which line number the snippet starts at
+        let first_line_num = if total > finding_span {
+            finding.location.start_line.saturating_sub((total - finding_span) / 2)
+        } else {
+            finding.location.start_line
+        };
+
+        for (i, line) in lines.iter().enumerate().take(7) {
+            let line_num = first_line_num + i;
+            let is_target = line_num >= finding.location.start_line
+                && line_num <= finding.location.end_line;
+            if is_target {
+                println!(
+                    "    {} {} {}",
+                    format!("{:>4}", line_num).bright_white(),
+                    "\u{2502}".blue(),
+                    line.bright_white()
+                );
+            } else {
+                println!(
+                    "    {} {} {}",
+                    format!("{:>4}", line_num).dimmed(),
+                    "\u{2502}".blue(),
+                    line.dimmed()
+                );
+            }
+        }
+        if total > 7 {
+            println!(
+                "    {} {} {}",
+                "    ".dimmed(),
+                "\u{2502}".blue(),
+                format!("... ({} more lines)", total - 7).dimmed()
+            );
+        }
+        println!();
+    }
 }
 
 /// Print truncation message if there are more findings
