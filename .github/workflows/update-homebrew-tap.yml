@@ -56,7 +56,7 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Update formula
+      - name: Update qryon formula
         run: |
           cat > homebrew-tap/Formula/qryon.rb << 'FORMULA'
           class Qryon < Formula
@@ -103,7 +103,6 @@ jobs:
           end
           FORMULA
 
-          # Replace placeholders with validated values
           sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" homebrew-tap/Formula/qryon.rb
           sed -i "s/TAG_PLACEHOLDER/${RELEASE_TAG}/g" homebrew-tap/Formula/qryon.rb
           sed -i "s/SHA256_MACOS_ARM_PLACEHOLDER/${SHA256_MACOS_ARM}/g" homebrew-tap/Formula/qryon.rb
@@ -111,12 +110,66 @@ jobs:
           sed -i "s/SHA256_LINUX_ARM_PLACEHOLDER/${SHA256_LINUX_ARM}/g" homebrew-tap/Formula/qryon.rb
           sed -i "s/SHA256_LINUX_INTEL_PLACEHOLDER/${SHA256_LINUX_INTEL}/g" homebrew-tap/Formula/qryon.rb
 
+      - name: Update rma formula (backward compatibility)
+        run: |
+          cat > homebrew-tap/Formula/rma.rb << 'FORMULA'
+          class Rma < Formula
+            desc "Ultra-fast Rust-native code intelligence and security analyzer (alias for qryon)"
+            homepage "https://github.com/bumahkib7/qryon"
+            version "VERSION_PLACEHOLDER"
+            license any_of: ["MIT", "Apache-2.0"]
+
+            on_macos do
+              on_arm do
+                url "https://github.com/bumahkib7/qryon/releases/download/TAG_PLACEHOLDER/qryon-aarch64-apple-darwin.tar.gz"
+                sha256 "SHA256_MACOS_ARM_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/bumahkib7/qryon/releases/download/TAG_PLACEHOLDER/qryon-x86_64-apple-darwin.tar.gz"
+                sha256 "SHA256_MACOS_INTEL_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/bumahkib7/qryon/releases/download/TAG_PLACEHOLDER/qryon-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA256_LINUX_ARM_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/bumahkib7/qryon/releases/download/TAG_PLACEHOLDER/qryon-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA256_LINUX_INTEL_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "qryon"
+              bin.install_symlink "qryon" => "rma"
+              generate_completions_from_executable(bin/"qryon", "completions")
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/qryon --version")
+
+              (testpath/"test.rs").write('fn main() { println!("hello"); }')
+              output = shell_output("#{bin}/qryon scan #{testpath} --format json 2>&1")
+              assert_match "findings", output
+            end
+          end
+          FORMULA
+
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/TAG_PLACEHOLDER/${RELEASE_TAG}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_MACOS_ARM_PLACEHOLDER/${SHA256_MACOS_ARM}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_MACOS_INTEL_PLACEHOLDER/${SHA256_MACOS_INTEL}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_LINUX_ARM_PLACEHOLDER/${SHA256_LINUX_ARM}/g" homebrew-tap/Formula/rma.rb
+          sed -i "s/SHA256_LINUX_INTEL_PLACEHOLDER/${SHA256_LINUX_INTEL}/g" homebrew-tap/Formula/rma.rb
+
       - name: Commit and push
         working-directory: homebrew-tap
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add Formula/qryon.rb
-          git diff --staged --quiet || git commit -m "Update qryon to ${VERSION}"
+          git add Formula/qryon.rb Formula/rma.rb
+          git diff --staged --quiet || git commit -m "Update qryon and rma to ${VERSION}"
           git push
